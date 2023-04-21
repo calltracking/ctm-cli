@@ -1,24 +1,38 @@
 # CTM Lambda Configuration File
-development:
-  object:
-    id: LDA8CA4483EED6CEF9E23D44ABA13606CBAAEA917D2CCAED929
-    name: Sample Function
-    description: Lookup insight about the account given a GPT question
-    code: index.js
-    runtime: nodejs
-    exec_type: trigger
-    mode:
-    variables:
-      - name: Dude
-        value: Car
-      - name: Foo
-        value: Bar
-    packages:
-      - layer_arn: 'arn:aws:lambda:us-east-1:580674011299:layer:jsforce-1_10_1:1'
-    credentials:
-      - provider: 'salesforce'
+base_object: &base_object
+  name: Sample Function
+  description: Lookup insight about the account given a GPT question
+  code: load_file_code_js
+  runtime: nodejs
+  exec_type: trigger
+  mode:
+  variables:
+    - name: Dude
+      value: Car
+    - name: Foo
+      value: Bar
+  packages:
+    - layer_arn: 'arn:aws:lambda:us-east-1:580674011299:layer:jsforce-1_10_1:1'
+  credentials:
+    - provider: 'salesforce'
 
+development:
+  host: "app.ctmdev.us"
+  account: 18614
+  object:
+    <<: *base_object
+    id: LDA8CA4483EED6CEF9E23D44ABA13606CBAAEA917D2CCAED929
 
 staging:
+  host: "app.calltrackingmetrics.com"
+  account: 18614
+  object:
+    <<: *base_object
+    id: "TODO"
 
 production:
+  host: "app.calltrackingmetrics.com"
+  account: 18614
+  object:
+    <<: *base_object
+    id: "TODO"

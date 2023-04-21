@@ -1,12 +1,14 @@
 GEM
   remote: https://rubygems.org/
   specs:
+    json (2.6.3)
     yaml-lint (0.1.2)
 
 PLATFORMS
   arm64-darwin-22
 
 DEPENDENCIES
+  json
   yaml-lint
 
 BUNDLED WITH
