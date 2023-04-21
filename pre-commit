@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+
+# Define the path to the config file
+CONFIG_FILE = "config.yml"
+
+# Use yaml-lint to validate the YAML format
+yaml_lint_output = `yaml-lint #{CONFIG_FILE}`
+if $?.exitstatus != 0
+  puts "Error: Invalid YAML format in #{CONFIG_FILE}:"
+  puts yaml_lint_output
+  exit 1
+end
+
+# Use the ruby YAML library to load the config file to ensure it doesn't crash
+require 'yaml'
+begin
+  YAML.load_file(CONFIG_FILE)
+rescue => e
+  puts "Error: Failed to load #{CONFIG_FILE}: #{e.message}"
+  exit 1
+end
