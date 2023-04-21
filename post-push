@@ -28,5 +28,9 @@ if BRANCHES.include?(current_branch)
 
   puts "deploying #{JSON.pretty_generate(object)}"
 
-  system(%(curl -u#{api_key} -XPATCH -H'Content-Type:application/json' 'https://#{host}/api/v1/accounts/#{account}/lambdas/#{object['id']}' -d'#{object.to_json}'))
+  wrap = {
+    lambda_action: object
+  }
+
+  system(%(curl -u#{api_key} -XPATCH -H'Content-Type:application/json' 'https://#{host}/api/v1/accounts/#{account}/lambdas/#{object['id']}' -d'#{wrap.to_json}'))
 end
