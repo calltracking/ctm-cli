@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import subprocess
+import shutil
+import sys
+import requests
+import time
+import keyring
+from pprint import pprint
+
+
+CLIENT_ID = 'yWprzeqhLWzfi9Vo3JttlA-LpUcz4mcZuI7rch6y4DE'
+OAUTH2_DEVICE_CODE_URL = 'https://app.ctmdev.us/oauth2/device_token'
+OAUTH2_ACCESS_TOKEN_URL = 'https://app.ctmdev.us/oauth2/token'
+KEYRING_SERVICE_PREFIX = 'ctm.'
+
+def get_hook_script(filename: str) -> str:
+    if getattr(sys, 'frozen', False):
+        # Running as a bundled executable
+        hooks_folder = sys._MEIPASS
+    else:
+        # Running as a regular script
+        hooks_folder = os.path.join(os.path.dirname(__file__), 'hooks')
+
+    with open(os.path.join(hooks_folder, filename), 'r') as f:
+        return f.read()
+
+POST_PUSH_SCRIPT = get_hook_script("post_push.py")
+PRE_COMMIT_SCRIPT = get_hook_script("pre_commit.py")
+
+def main():
+    parser = argparse.ArgumentParser(description='Project folder creation and Git hooks setup')
+    parser.add_argument('-n', '--name', help='Project name', required=True)
+    parser.add_argument('-p', '--path', help='Project path', default='.')
+
+    args = parser.parse_args()
+
+    project_path = os.path.join(args.path, args.name)
+    create_project_folder(project_path)
+    initialize_git(project_path)
+    setup_git_hooks(project_path)
+    access_token = perform_oauth2_device_flow(CLIENT_ID)
+    store_access_token(KEYRING_SERVICE_PREFIX + args.name, access_token)
+    print("Access token stored securely.")
+
+def perform_oauth2_device_flow(client_id: str) -> str:
+    payload = {
+        'client_id': client_id,
+    }
+
+    response = requests.post(OAUTH2_DEVICE_CODE_URL, data=payload)
+    response.raise_for_status()
+    device_info = response.json()
+
+    print(f"Please visit {device_info['verification_uri']} and enter the code {device_info['user_code']}")
+
+    access_token = poll_for_access_token(client_id, device_info)
+    return access_token
+
+def poll_for_access_token(client_id: str, device_info: dict) -> str:
+    payload = {
+        'client_id': client_id,
+        'device_code': device_info['device_code'],
+        'grant_type': 'device_code',
+    }
+
+    while True:
+        response = requests.post(OAUTH2_ACCESS_TOKEN_URL, data=payload)
+
+        if response.status_code == 200:
+            token_info = response.json()
+            pprint(token_info)
+            return token_info['access_token']
+        elif response.status_code == 400:
+            error_info = response.json()
+            if error_info['error'] == 'authorization_pending':
+                print("Waiting for user authorization...")
+            else:
+                raise RuntimeError(f"Error while polling for access token: {error_info['error']}")
+        else:
+            response.raise_for_status()
+
+        time.sleep(device_info['interval'])
+
+def store_access_token(service: str, access_token: str):
+    keyring.set_password(service, 'access_token', access_token)
+
+def create_project_folder(project_path: str):
+    if not os.path.exists(project_path):
+        os.makedirs(project_path)
+        print(f"Created project folder: {project_path}")
+    else:
+        print(f"Project folder already exists: {project_path}")
+
+
+def initialize_git(project_path: str):
+    subprocess.run(["git", "init"], cwd=project_path)
+    print(f"Initialized Git repository in {project_path}")
+
+
+def setup_git_hooks(project_path: str):
+    hooks_path = os.path.join(project_path, ".git", "hooks")
+
+    # Write and set executable permissions for post-push script
+    post_push_target = os.path.join(hooks_path, "post-push")
+    with open(post_push_target, 'w') as f:
+        f.write(POST_PUSH_SCRIPT)
+    os.chmod(post_push_target, 0o755)
+    print(f"Installed post-push script in {post_push_target}")
+
+    # Write and set executable permissions for pre-commit script
+    pre_commit_target = os.path.join(hooks_path, "pre-commit")
+    with open(pre_commit_target, 'w') as f:
+        f.write(PRE_COMMIT_SCRIPT)
+    os.chmod(pre_commit_target, 0o755)
+    print(f"Installed pre-commit script in {pre_commit_target}")
+
+
+if __name__ == "__main__":
+    main()

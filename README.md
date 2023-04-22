@@ -15,4 +15,12 @@ post-push:
 
 # dependencies
 
-/opt/homebrew/bin/pip3 install yamllint
+python3 -m venv env
+
+./env/bin/pip3 -r requirements.txt
+
+build installer
+
+```
+pyinstaller --onefile --add-data "hooks/post_push.py;hooks" --add-data "hooks/pre_commit.py;hooks" create_project.py
+```
