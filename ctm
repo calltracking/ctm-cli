@@ -19,19 +19,13 @@ OAUTH2_DEVICE_CODE_URL = 'https://app.ctmdev.us/oauth2/device_token'
 OAUTH2_ACCESS_TOKEN_URL = 'https://app.ctmdev.us/oauth2/token'
 KEYRING_SERVICE_PREFIX = 'ctm.'
 
-def get_hook_script(filename: str) -> str:
-    if getattr(sys, 'frozen', False):
-        # Running as a bundled executable
-        hooks_folder = sys._MEIPASS
-    else:
-        # Running as a regular script
-        hooks_folder = os.path.join(os.path.dirname(__file__), 'hooks')
+POST_PUSH_SCRIPT = """#!/bin/bash
+ctm post-push
+"""
 
-    with open(os.path.join(hooks_folder, filename), 'r') as f:
-        return f.read()
-
-POST_PUSH_SCRIPT = get_hook_script("post_push")
-PRE_COMMIT_SCRIPT = get_hook_script("pre_commit")
+PRE_COMMIT_SCRIPT = """#!/bin/bash
+ctm pre-commit
+"""
 
 def main():
     parser = argparse.ArgumentParser(description="ctm command-line tool")

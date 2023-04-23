@@ -21,6 +21,10 @@ python3 -m venv env
 
 build installer
 
+Mac OSX installer
 ```
-pyinstaller --onefile --add-data "hooks/post_push.py;hooks" --add-data "hooks/pre_commit.py;hooks" create_project.py
+pyinstaller --onefile  ctm --osx-entitlements-file entitlements.plist
+security find-identity -p basic -v
+codesign --deep --force --options=runtime --entitlements ./entitlements.plist --sign  656DA... --timestamp ./dist/ctm
 ```
+
