@@ -52,8 +52,8 @@ build installer
 
 Mac OSX installer
 ```
-pyinstaller --onefile  ctm --osx-entitlements-file entitlements.plist
+pyinstaller --onedir  ctm --osx-entitlements-file entitlements.plist
 security find-identity -p basic -v
-codesign --deep --force --options=runtime --entitlements ./entitlements.plist --sign  656DA... --timestamp ./dist/ctm
+codesign --deep --force --options=runtime --entitlements ./entitlements.plist --sign  656DA... --timestamp ./dist/ctm/ctm
 ```
 
