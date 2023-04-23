@@ -27,6 +27,43 @@ PRE_COMMIT_SCRIPT = """#!/bin/bash
 ctm pre-commit
 """
 
+BASE_CONFIG = """# CTM Lambda Configuration File
+base_object: &base_object
+  name: Your Lambda Function
+  description: Description of what your Lambda function does
+  code: load_file_code_js
+  runtime: nodejs
+  exec_type: trigger
+  mode:
+  variables:
+    - name: API_KEY
+      value: An API key if you need it
+    - name: Another Key
+      value: variable value
+  packages:
+    - layer_arn: 'arn:aws:lambda:us-east-1:580674011299:layer:jsforce-1_10_1:1'
+  credentials:
+    - provider: 'salesforce'
+
+development:
+  host: "app.calltrackingmetrics.com"
+  object:
+    <<: *base_object
+    id: replace with your object id LDA...
+
+staging:
+  host: "app.calltrackingmetrics.com"
+  object:
+    <<: *base_object
+    id: replace with your object id LDA...
+
+production:
+  host: "app.calltrackingmetrics.com"
+  object:
+    <<: *base_object
+    id: replace with your object id LDA...
+"""
+
 def main():
     parser = argparse.ArgumentParser(description="ctm command-line tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -149,14 +186,10 @@ def run_post_push():
             env_config = config[env]
 
         host = env_config['host']
-        account = env_config['account']
         obj = env_config['object']
         if 'code' in obj:
             with open('code.js', 'r') as code_file:
                 obj['code'] = code_file.read()
-
-        # Prompt the user for the API key
-        # api_key = input(f"Enter your API key for branch {current_branch}:")
 
         print(f"deploying {json.dumps(obj, indent=2)}")
 
@@ -164,14 +197,27 @@ def run_post_push():
             'lambda_action': obj
         }
 
-        #command = f"curl -u{api_key} -XPATCH -H'Content-Type:application/json' 'https://{host}/api/v1/accounts/{account}/lambdas/{obj['id']}' -d'{json.dumps(wrap)}'"
-        command = f"curl -H 'Authorization: Bearer {access_token}' -XPATCH -H'Content-Type:application/json' 'https://{host}/api/v1/accounts/{account}/lambdas/{obj['id']}' -d'{json.dumps(wrap)}'"
-        os.system(command)
+#        command = f"curl -H 'Authorization: Bearer {access_token}' -XPATCH -H'Content-Type:application/json' 'https://{host}/api/v1/accounts/{account_id}/lambdas/{obj['id']}' -d'{json.dumps(wrap)}'"
+#        os.system(command)
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        url = f"https://{host}/api/v1/accounts/{account_id}/lambdas/{obj['id']}"
+        data = json.dumps(wrap)
+
+        response = requests.patch(url, headers=headers, data=data)
+
+        # You can check the response status code and content if needed
+        print(response.status_code)
+        print(response.content)
 
 def create_new_repo(name: str, path: str):
     project_path = os.path.join(path, name)
     create_project_folder(project_path)
     initialize_git(project_path)
+    add_base_files(name, project_path)
     setup_git_hooks(name, project_path)
     token_info = perform_oauth2_device_flow(CLIENT_ID)
     store_access_token(name, token_info)
@@ -243,6 +289,18 @@ def initialize_git(project_path: str):
     subprocess.run(["git", "init"], cwd=project_path)
     print(f"Initialized Git repository in {project_path}")
 
+def add_base_files(name: str, project_path: str):
+    # Write a .ctmproject file with the name of our project
+    proj_file = os.path.join(project_path, ".ctmproject")
+    with open(proj_file, 'w') as f:
+        f.write(name)
+    subprocess.run(["git", "add", proj_file], cwd=project_path)
+
+    # Write a config.yml file with the name of our project
+    conf_file = os.path.join(project_path, "config.yml")
+    with open(conf_file, 'w') as f:
+        f.write(BASE_CONFIG)
+    subprocess.run(["git", "add", conf_file], cwd=project_path)
 
 def setup_git_hooks(name: str, project_path: str):
     hooks_path = os.path.join(project_path, ".git", "hooks")
@@ -261,9 +319,6 @@ def setup_git_hooks(name: str, project_path: str):
     os.chmod(pre_commit_target, 0o755)
     print(f"Installed pre-commit script in {pre_commit_target}")
 
-    # Write a .ctmproject file with the name of our project
-    with open(os.path.join(project_path, ".ctmproject"), 'w') as f:
-        f.write(name)
 
 def read_project_name(project_dir: str) -> str:
     project_file = os.path.join(project_dir, ".ctmproject")
