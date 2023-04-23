@@ -5,7 +5,16 @@ A commandline tool for maintaining CTM objects very useful when building with CT
 # Usage
 
 ```
-usage: ctm create-repo [-h] -n NAME [-p PATH]
+ctm verify - will validate the files in your current directory
+```
+
+```
+ctm deploy - will deploy your files assuming they are correct to upstream ctm servers
+```
+
+```
+# ctm create - will create a new directory and initialize a new git repo for you
+usage: ctm create [-h] -n NAME [-p PATH]
 
 options:
   -h, --help            show this help message and exit

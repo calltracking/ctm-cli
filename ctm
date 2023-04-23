@@ -20,11 +20,11 @@ OAUTH2_ACCESS_TOKEN_URL = 'https://app.ctmdev.us/oauth2/token'
 KEYRING_SERVICE_PREFIX = 'ctm.'
 
 POST_PUSH_SCRIPT = """#!/bin/bash
-ctm post-push
+ctm deploy
 """
 
 PRE_COMMIT_SCRIPT = """#!/bin/bash
-ctm pre-commit
+ctm verify
 """
 
 BASE_CONFIG = """# CTM Lambda Configuration File
@@ -64,28 +64,65 @@ production:
     id: replace with your object id LDA...
 """
 
+SAMPLE_CODE_FILE = """exports.handler = async (event, context) => {
+  /*
+  // event exposes the activity object
+    const call = event.activity; // call, text, chat, form, video, fax, etc...
+
+  // context includes an http interface
+  // make a GET request
+    const get_url = 'https://api.your-service.com/some-endpoint';
+    const {request, response, data} = await context.http_get(get_url);
+  // make a POST request
+    const postData = JSON.stringify({key:'value'});
+    const authHeaders = {Authentication: 'Bearer ...', 'Content-Type':'application/json'};
+    const post_url = 'https://api.your-service.com/some-endpoint';
+    const { request, response, data } = context.http_post(post_url, postData, authHeaders);
+  //
+  // event exposes
+  // event.id       - a reference to this lambda function
+  // event.activity - the call, text or form message that triggered this function, see event.activity.direction
+  // event.options  - any additional user provided inputs
+  //
+
+  // you can also use some helper methods to easily score or update an activity
+  // await context.ctm.score('reportTag', 5, 400, true, new Date(), {fieldA: 'Super'});
+
+  // or you can update the contact record fields associated to the activity
+  // await context.ctm.update({name: 'Hello World', email: 'leads@example.com', custom_fields: {fieldA: 'Super'}});
+
+  // both the http interface and the ctm interface return a Promise allowing you to wait for the methods to complete or
+  // detect errors if they fail
+
+  // if you are not using async await then you must be sure to call context.done() to signal the completion of your script, if you are using a promise use this in the
+  // promise completion to ensure the code isn't terminated before the promise returns or within the response to a callback function.
+  */
+}
+"""
+
 def main():
     parser = argparse.ArgumentParser(description="ctm command-line tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    precommit_parser = subparsers.add_parser("pre-commit", help="Run the pre-commit action")
+    verify_parser = subparsers.add_parser("verify", help="Validate your project configuration file and assoicated code file is valid")
 
-    postpush_parser = subparsers.add_parser("post-push", help="Run the post-push action")
+    deploy_parser = subparsers.add_parser("deploy", help="Deploy your project to the CTM platform")
+    deploy_parser.add_argument('-e', '--environment', help='Deployment environment', required=False)
 
-    create_repo_parser = subparsers.add_parser("create-repo", help="Create a new git repository and initialize it with pre-commit and post-push hooks")
+    create_repo_parser = subparsers.add_parser("create", help="Create a new git repository for a new project")
     create_repo_parser.add_argument('-n', '--name', help='Project name', required=True)
     create_repo_parser.add_argument('-p', '--path', help='Project path', default='.')
 
     args = parser.parse_args()
 
-    if args.command == "precommit":
-        run_precommit()
-    elif args.command == "post-push":
-        run_post_push()
-    elif args.command == "create-repo":
+    if args.command == "verify":
+        run_verify()
+    elif args.command == "deploy":
+        run_deploy(args.environment)
+    elif args.command == "create":
         create_new_repo(args.name, args.path)
 
-def run_precommit():
+def run_verify():
   # Define the path to the config file
   CONFIG_FILE = "config.yml"
 
@@ -108,7 +145,7 @@ def run_precommit():
               print(f"Error: Missing '{env_key}' key in {CONFIG_FILE}")
               sys.exit(1)
 
-          for key in ['host', 'object', 'account']:
+          for key in ['host', 'object']:
               if cfg.get(key) is None:
                   print(f"Error: Missing '{key}' key in {CONFIG_FILE} for {env_key}\n\n{cfg}")
                   sys.exit(1)
@@ -137,7 +174,7 @@ def refresh_access_token(refresh_token, client_id):
     response = requests.post(OAUTH2_ACCESS_TOKEN_URL, data=data)
     return response.json()
 
-def run_post_push():
+def run_deploy(env: str):
     BRANCHES = ['master', 'release-production', 'release-staging', 'release-development']
     deployment_targets = ['production', 'staging', 'development']
 
@@ -175,43 +212,44 @@ def run_post_push():
     current_branch = subprocess.check_output(
         ['git', 'rev-parse', '--abbrev-ref', 'HEAD']).decode('utf-8').strip()
 
-    if current_branch in BRANCHES:
-        env = current_branch.split('-')[-1]
-        print(f"Current branch is {current_branch}, deploying to {env}")
-        if env is None or env not in deployment_targets:
-          env = 'development'
+    if env is None:
+        if current_branch in BRANCHES:
+            env = current_branch.split('-')[-1]
+            print(f"Current branch is {current_branch}, deploying to {env}")
+            if env is None or env not in deployment_targets:
+              env = 'development'
 
-        with open("config.yml", 'r') as config_file:
-            config = yaml.safe_load(config_file)
-            env_config = config[env]
+    with open("config.yml", 'r') as config_file:
+        config = yaml.safe_load(config_file)
+        env_config = config[env]
 
-        host = env_config['host']
-        obj = env_config['object']
-        if 'code' in obj:
-            with open('code.js', 'r') as code_file:
-                obj['code'] = code_file.read()
+    host = env_config['host']
+    obj = env_config['object']
+    if 'code' in obj:
+        with open('code.js', 'r') as code_file:
+            obj['code'] = code_file.read()
 
-        print(f"deploying {json.dumps(obj, indent=2)}")
+    print(f"deploying {json.dumps(obj, indent=2)}")
 
-        wrap = {
-            'lambda_action': obj
-        }
+    wrap = {
+        'lambda_action': obj
+    }
 
 #        command = f"curl -H 'Authorization: Bearer {access_token}' -XPATCH -H'Content-Type:application/json' 'https://{host}/api/v1/accounts/{account_id}/lambdas/{obj['id']}' -d'{json.dumps(wrap)}'"
 #        os.system(command)
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
 
-        url = f"https://{host}/api/v1/accounts/{account_id}/lambdas/{obj['id']}"
-        data = json.dumps(wrap)
+    url = f"https://{host}/api/v1/accounts/{account_id}/lambdas/{obj['id']}"
+    data = json.dumps(wrap)
 
-        response = requests.patch(url, headers=headers, data=data)
+    response = requests.patch(url, headers=headers, data=data)
 
-        # You can check the response status code and content if needed
-        print(response.status_code)
-        print(response.content)
+    # You can check the response status code and content if needed
+    print(response.status_code)
+    print(response.content)
 
 def create_new_repo(name: str, path: str):
     project_path = os.path.join(path, name)
@@ -301,6 +339,11 @@ def add_base_files(name: str, project_path: str):
     with open(conf_file, 'w') as f:
         f.write(BASE_CONFIG)
     subprocess.run(["git", "add", conf_file], cwd=project_path)
+
+    code_file = os.path.join(project_path, "code.js")
+    with open(code_file, 'w') as f:
+        f.write(SAMPLE_CODE_FILE)
+    subprocess.run(["git", "add", code_file], cwd=project_path)
 
 def setup_git_hooks(name: str, project_path: str):
     hooks_path = os.path.join(project_path, ".git", "hooks")
