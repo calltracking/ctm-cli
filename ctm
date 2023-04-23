@@ -4,10 +4,13 @@ import argparse
 import os
 import subprocess
 import shutil
+import yaml
+import json
 import sys
 import requests
 import time
 import keyring
+from typing import List
 from pprint import pprint
 
 
@@ -27,23 +30,159 @@ def get_hook_script(filename: str) -> str:
     with open(os.path.join(hooks_folder, filename), 'r') as f:
         return f.read()
 
-POST_PUSH_SCRIPT = get_hook_script("post_push.py")
-PRE_COMMIT_SCRIPT = get_hook_script("pre_commit.py")
+POST_PUSH_SCRIPT = get_hook_script("post_push")
+PRE_COMMIT_SCRIPT = get_hook_script("pre_commit")
 
 def main():
-    parser = argparse.ArgumentParser(description='Project folder creation and Git hooks setup')
-    parser.add_argument('-n', '--name', help='Project name', required=True)
-    parser.add_argument('-p', '--path', help='Project path', default='.')
+    parser = argparse.ArgumentParser(description="ctm command-line tool")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    precommit_parser = subparsers.add_parser("pre-commit", help="Run the pre-commit action")
+
+    postpush_parser = subparsers.add_parser("post-push", help="Run the post-push action")
+
+    create_repo_parser = subparsers.add_parser("create-repo", help="Create a new git repository and initialize it with pre-commit and post-push hooks")
+    create_repo_parser.add_argument('-n', '--name', help='Project name', required=True)
+    create_repo_parser.add_argument('-p', '--path', help='Project path', default='.')
 
     args = parser.parse_args()
 
-    project_path = os.path.join(args.path, args.name)
+    if args.command == "precommit":
+        run_precommit()
+    elif args.command == "post-push":
+        run_post_push()
+    elif args.command == "create-repo":
+        create_new_repo(args.name, args.path)
+
+def run_precommit():
+  # Define the path to the config file
+  CONFIG_FILE = "config.yml"
+
+  # Use yamllint to validate the YAML format
+  yaml_lint_output = subprocess.run(['yamllint', CONFIG_FILE], capture_output=True, text=True)
+
+  if yaml_lint_output.returncode != 0:
+      print(f"Error: Invalid YAML format in {CONFIG_FILE}:")
+      print(yaml_lint_output.stdout)
+      sys.exit(1)
+
+  # Use the Python YAML library to load the config file to ensure it doesn't crash
+  try:
+      with open(CONFIG_FILE, 'r') as config_file:
+          config = yaml.safe_load(config_file)
+
+      for env_key in ['development', 'staging', 'production']:
+          cfg = config.get(env_key)
+          if cfg is None:
+              print(f"Error: Missing '{env_key}' key in {CONFIG_FILE}")
+              sys.exit(1)
+
+          for key in ['host', 'object', 'account']:
+              if cfg.get(key) is None:
+                  print(f"Error: Missing '{key}' key in {CONFIG_FILE} for {env_key}\n\n{cfg}")
+                  sys.exit(1)
+
+          obj = cfg['object']
+          if 'code' in obj:
+              if not os.path.exists('code.js'):
+                  print("Error: Missing code.js file")
+                  sys.exit(1)
+
+              node_check = subprocess.run(["/usr/bin/env", "node", "-c", "code.js"])
+              if node_check.returncode != 0:
+                  print("Error: code.js is not valid JavaScript")
+                  sys.exit(1)
+
+  except Exception as e:
+      print(f"Error: Failed to load {CONFIG_FILE}: {e}")
+      sys.exit(1)
+
+def refresh_access_token(refresh_token, client_id):
+    data = {
+        'grant_type': 'refresh_token',
+        'client_id': client_id,
+        'refresh_token': refresh_token
+    }
+    response = requests.post(OAUTH2_ACCESS_TOKEN_URL, data=data)
+    return response.json()
+
+def run_post_push():
+    BRANCHES = ['master', 'release-production', 'release-staging', 'release-development']
+    deployment_targets = ['production', 'staging', 'development']
+
+    project_name = read_project_name(os.getcwd())
+    print(f"Project name: {project_name}")
+    token_info = get_access_token(project_name)
+    print(f"Access token: {token_info}")
+    if token_info is None or 'expires_at' not in token_info or int(time.time()) > token_info['expires_at']:
+        print(f"Access token not found or expired, performing a new OAuth2 device flow...")
+        # Token is expired or not found
+        if token_info and 'refresh_token' in token_info:
+            print("Refreshing access token")
+            token_info = refresh_access_token(token_info['refresh_token'], CLIENT_ID)
+            if token_info and 'access_token' in token_info:
+              store_access_token(project_name, token_info)
+            else:
+              print("Failed to refresh access token")
+        else:
+            # Perform a new access token flow
+            print("Access token not found or expired, performing a new OAuth2 device flow...")
+            token_info = perform_oauth2_device_flow(CLIENT_ID)
+            store_access_token(project_name, token_info)
+
+    if token_info is None or 'access_token' not in token_info:
+      print("Failed to get access token.  Reset try again")
+      store_access_token(project_name, {})
+      return
+    # Use the access token to perform your tasks
+    access_token = token_info['access_token']
+    refresh_token = token_info['refresh_token']
+    account_id = token_info['account_id']
+    expires_in = token_info['expires_in']
+    print(f"access token: {access_token} for account {account_id} expires in {expires_in} seconds")
+
+    current_branch = subprocess.check_output(
+        ['git', 'rev-parse', '--abbrev-ref', 'HEAD']).decode('utf-8').strip()
+
+    if current_branch in BRANCHES:
+        env = current_branch.split('-')[-1]
+        print(f"Current branch is {current_branch}, deploying to {env}")
+        if env is None or env not in deployment_targets:
+          env = 'development'
+
+        with open("config.yml", 'r') as config_file:
+            config = yaml.safe_load(config_file)
+            env_config = config[env]
+
+        host = env_config['host']
+        account = env_config['account']
+        obj = env_config['object']
+        if 'code' in obj:
+            with open('code.js', 'r') as code_file:
+                obj['code'] = code_file.read()
+
+        # Prompt the user for the API key
+        # api_key = input(f"Enter your API key for branch {current_branch}:")
+
+        print(f"deploying {json.dumps(obj, indent=2)}")
+
+        wrap = {
+            'lambda_action': obj
+        }
+
+        #command = f"curl -u{api_key} -XPATCH -H'Content-Type:application/json' 'https://{host}/api/v1/accounts/{account}/lambdas/{obj['id']}' -d'{json.dumps(wrap)}'"
+        command = f"curl -H 'Authorization: Bearer {access_token}' -XPATCH -H'Content-Type:application/json' 'https://{host}/api/v1/accounts/{account}/lambdas/{obj['id']}' -d'{json.dumps(wrap)}'"
+        os.system(command)
+
+def create_new_repo(name: str, path: str):
+    project_path = os.path.join(path, name)
     create_project_folder(project_path)
     initialize_git(project_path)
-    setup_git_hooks(project_path)
-    access_token = perform_oauth2_device_flow(CLIENT_ID)
-    store_access_token(KEYRING_SERVICE_PREFIX + args.name, access_token)
-    print("Access token stored securely.")
+    setup_git_hooks(name, project_path)
+    token_info = perform_oauth2_device_flow(CLIENT_ID)
+    store_access_token(name, token_info)
+    print("Project ready for development.")
+
 
 def perform_oauth2_device_flow(client_id: str) -> str:
     payload = {
@@ -56,8 +195,9 @@ def perform_oauth2_device_flow(client_id: str) -> str:
 
     print(f"Please visit {device_info['verification_uri']} and enter the code {device_info['user_code']}")
 
-    access_token = poll_for_access_token(client_id, device_info)
-    return access_token
+    token_info = poll_for_access_token(client_id, device_info)
+    token_info['device_code'] = device_info['device_code']
+    return token_info
 
 def poll_for_access_token(client_id: str, device_info: dict) -> str:
     payload = {
@@ -71,8 +211,7 @@ def poll_for_access_token(client_id: str, device_info: dict) -> str:
 
         if response.status_code == 200:
             token_info = response.json()
-            pprint(token_info)
-            return token_info['access_token']
+            return token_info
         elif response.status_code == 400:
             error_info = response.json()
             if error_info['error'] == 'authorization_pending':
@@ -84,8 +223,19 @@ def poll_for_access_token(client_id: str, device_info: dict) -> str:
 
         time.sleep(device_info['interval'])
 
-def store_access_token(service: str, access_token: str):
-    keyring.set_password(service, 'access_token', access_token)
+def store_access_token(name: str, value: dict):
+    if 'expires_in' in value:
+        value['expires_at'] = int(time.time()) + value['expires_in']
+    token_info_str = json.dumps(value)
+    keyring.set_password(KEYRING_SERVICE_PREFIX + name, 'token_info', token_info_str)
+
+def get_access_token(name: str) -> str:
+    prefix = KEYRING_SERVICE_PREFIX
+    print(f"Read access token for {prefix}{name} in keychain")
+    token_info_str = keyring.get_password(KEYRING_SERVICE_PREFIX + name, 'token_info')
+    print(f"token_info_str: {token_info_str}")
+    return json.loads(token_info_str) if token_info_str else None
+
 
 def create_project_folder(project_path: str):
     if not os.path.exists(project_path):
@@ -100,7 +250,7 @@ def initialize_git(project_path: str):
     print(f"Initialized Git repository in {project_path}")
 
 
-def setup_git_hooks(project_path: str):
+def setup_git_hooks(name: str, project_path: str):
     hooks_path = os.path.join(project_path, ".git", "hooks")
 
     # Write and set executable permissions for post-push script
@@ -117,6 +267,23 @@ def setup_git_hooks(project_path: str):
     os.chmod(pre_commit_target, 0o755)
     print(f"Installed pre-commit script in {pre_commit_target}")
 
+    # Write a .ctmproject file with the name of our project
+    with open(os.path.join(project_path, ".ctmproject"), 'w') as f:
+        f.write(name)
+
+def read_project_name(project_dir: str) -> str:
+    project_file = os.path.join(project_dir, ".ctmproject")
+
+    try:
+        with open(project_file, "r") as f:
+            project_name = f.readline().strip()
+        return project_name
+    except FileNotFoundError:
+        print(f"Error: .ctmproject file not found in {project_dir}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: Failed to read project name from .ctmproject file: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
