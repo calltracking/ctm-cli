@@ -14,9 +14,9 @@ from typing import List
 from pprint import pprint
 
 
-CLIENT_ID = 'yWprzeqhLWzfi9Vo3JttlA-LpUcz4mcZuI7rch6y4DE'
-OAUTH2_DEVICE_CODE_URL = 'https://app.ctmdev.us/oauth2/device_token'
-OAUTH2_ACCESS_TOKEN_URL = 'https://app.ctmdev.us/oauth2/token'
+CLIENT_ID = 'VWBl5YHU4-xRq5Q-A4jqa8tHYD5XvOl2sH_ZEFxj8xU'
+OAUTH2_DEVICE_CODE_URL = 'https://app.calltrackingmetrics.com/oauth2/device_token'
+OAUTH2_ACCESS_TOKEN_URL = 'https://app.calltrackingmetrics.com/oauth2/token'
 KEYRING_SERVICE_PREFIX = 'ctm.'
 
 POST_PUSH_SCRIPT = """#!/bin/bash
@@ -109,9 +109,12 @@ def main():
     deploy_parser = subparsers.add_parser("deploy", help="Deploy your project to the CTM platform")
     deploy_parser.add_argument('-e', '--environment', help='Deployment environment', required=False)
 
-    create_repo_parser = subparsers.add_parser("create", help="Create a new git repository for a new project")
+    create_repo_parser = subparsers.add_parser("create:lambda", help="Create a new git repository for a new project")
     create_repo_parser.add_argument('-n', '--name', help='Project name', required=True)
     create_repo_parser.add_argument('-p', '--path', help='Project path', default='.')
+
+    reset_repo_parser = subparsers.add_parser("reset:credentials", help="Reset the stored credentials for a given project")
+    reset_repo_parser.add_argument('-n', '--name', help='Project name', default='.')
 
     args = parser.parse_args()
 
@@ -119,9 +122,16 @@ def main():
         run_verify()
     elif args.command == "deploy":
         run_deploy(args.environment)
-    elif args.command == "create":
+    elif args.command == "create:lambda":
         create_new_repo(args.name, args.path)
+    elif args.command == "reset:credentials":
+        reset_credentials(args.name)
+    else:
+        printf("Unknown command: {args.command}")
 
+def reset_credentials(name):
+    store_access_token(name, {})
+  
 def run_verify():
   # Define the path to the config file
   CONFIG_FILE = "config.yml"
@@ -174,14 +184,9 @@ def refresh_access_token(refresh_token, client_id):
     response = requests.post(OAUTH2_ACCESS_TOKEN_URL, data=data)
     return response.json()
 
-def run_deploy(env: str):
-    BRANCHES = ['master', 'release-production', 'release-staging', 'release-development']
-    deployment_targets = ['production', 'staging', 'development']
 
-    project_name = read_project_name(os.getcwd())
-    print(f"Project name: {project_name}")
+def validate_acess(project_name: str):
     token_info = get_access_token(project_name)
-    print(f"Access token: {token_info}")
     if token_info is None or 'expires_at' not in token_info or int(time.time()) > token_info['expires_at']:
         print(f"Access token not found or expired, performing a new OAuth2 device flow...")
         # Token is expired or not found
@@ -203,16 +208,29 @@ def run_deploy(env: str):
       store_access_token(project_name, {})
       return
     # Use the access token to perform your tasks
+    return token_info
+  
+
+def run_deploy(env: str):
+    BRANCHES = ['master', 'release-production', 'release-staging', 'release-development']
+    deployment_targets = ['production', 'staging', 'development']
+
+    project_name = read_project_name(os.getcwd())
+    print(f"Project name: {project_name}")
+    token_info = validate_acess(project_name)
+    if token_info is None:
+      return
+    # Use the access token to perform your tasks
     access_token = token_info['access_token']
     refresh_token = token_info['refresh_token']
     account_id = token_info['account_id']
     expires_in = token_info['expires_in']
     print(f"access token: {access_token} for account {account_id} expires in {expires_in} seconds")
 
-    current_branch = subprocess.check_output(
-        ['git', 'rev-parse', '--abbrev-ref', 'HEAD']).decode('utf-8').strip()
-
     if env is None:
+        current_branch = subprocess.check_output(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD']).decode('utf-8').strip()
+
         if current_branch in BRANCHES:
             env = current_branch.split('-')[-1]
             print(f"Current branch is {current_branch}, deploying to {env}")
@@ -252,14 +270,21 @@ def run_deploy(env: str):
     print(response.content)
 
 def create_new_repo(name: str, path: str):
+    token_info = validate_acess(name)
+    if token_info is None:
+        token_info = perform_oauth2_device_flow(CLIENT_ID)
+    if token_info is None:
+        print("Failed to get access token. Before we can create your project we must get an access token.  Please try again.")
+        return
+    store_access_token(name, token_info)
+    print("Creating new project...")
+
     project_path = os.path.join(path, name)
     create_project_folder(project_path)
     initialize_git(project_path)
     add_base_files(name, project_path)
-    setup_git_hooks(name, project_path)
-    token_info = perform_oauth2_device_flow(CLIENT_ID)
-    store_access_token(name, token_info)
-    print("Project ready for development.")
+    initialize_lambda(name, token_info)
+    print(f"Project ready at {project_path}/{name}")
 
 
 def perform_oauth2_device_flow(client_id: str) -> str:
@@ -271,13 +296,16 @@ def perform_oauth2_device_flow(client_id: str) -> str:
     response.raise_for_status()
     device_info = response.json()
 
-    print(f"Please visit {device_info['verification_uri']} and enter the code {device_info['user_code']}")
+    print(f"\n\nPlease visit {device_info['verification_uri']} and enter the code {device_info['user_code']}\n\n")
 
     token_info = poll_for_access_token(client_id, device_info)
     token_info['device_code'] = device_info['device_code']
     return token_info
 
 def poll_for_access_token(client_id: str, device_info: dict) -> str:
+    symbols = ['-', '\\', '|', '/']
+    interval = device_info['interval']
+
     payload = {
         'client_id': client_id,
         'device_code': device_info['device_code'],
@@ -294,12 +322,16 @@ def poll_for_access_token(client_id: str, device_info: dict) -> str:
             error_info = response.json()
             if error_info['error'] == 'authorization_pending':
                 print("Waiting for user authorization...")
+                print(f"Please visit {device_info['verification_uri']} and enter the code {device_info['user_code']}")
             else:
                 raise RuntimeError(f"Error while polling for access token: {error_info['error']}")
         else:
             response.raise_for_status()
 
-        time.sleep(device_info['interval'])
+        for symbol in symbols:
+            sys.stdout.write(f'\rWaiting for user authorization... {symbol}')
+            sys.stdout.flush()
+            time.sleep(interval)
 
 def store_access_token(name: str, value: dict):
     if 'expires_in' in value:
@@ -345,22 +377,43 @@ def add_base_files(name: str, project_path: str):
         f.write(SAMPLE_CODE_FILE)
     subprocess.run(["git", "add", code_file], cwd=project_path)
 
-def setup_git_hooks(name: str, project_path: str):
-    hooks_path = os.path.join(project_path, ".git", "hooks")
 
-    # Write and set executable permissions for post-push script
-    post_push_target = os.path.join(hooks_path, "post-push")
-    with open(post_push_target, 'w') as f:
-        f.write(POST_PUSH_SCRIPT)
-    os.chmod(post_push_target, 0o755)
-    print(f"Installed post-push script in {post_push_target}")
+def update_id_in_yaml(file_path: str, new_id: str):
+    with open(file_path, 'r') as f:
+        config = yaml.safe_load(f)
 
-    # Write and set executable permissions for pre-commit script
-    pre_commit_target = os.path.join(hooks_path, "pre-commit")
-    with open(pre_commit_target, 'w') as f:
-        f.write(PRE_COMMIT_SCRIPT)
-    os.chmod(pre_commit_target, 0o755)
-    print(f"Installed pre-commit script in {pre_commit_target}")
+    config['development']['object']['id'] = new_id
+
+    with open(file_path, 'w') as f:
+        yaml.safe_dump(config, f)
+
+def initialize_lambda(name: str, token_info: dict):
+    access_token = token_info['access_token']
+    user_id      = token_info['user_id'] # run as this user
+    account_id   = token_info['account_id'] # run as this user
+    wrap = {
+        'lambda_action': {
+            'name': name,
+            'runtime': 'nodejs',
+            'mode': 'trigger',
+            'code': SAMPLE_CODE_FILE
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    url = f"https://app.calltrackingmetrics.com/api/v1/accounts/{account_id}/lambdas/"
+    data = json.dumps(wrap)
+
+    response = requests.post(url, headers=headers, data=data)
+
+    # You can check the response status code and content if needed
+    print(response.status_code)
+    print(response.content)
+    update_id_in_yaml('config.yml', json.loads(response.content)['lambda_action']['id'])
 
 
 def read_project_name(project_dir: str) -> str:

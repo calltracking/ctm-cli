@@ -5,15 +5,15 @@ A commandline tool for maintaining CTM objects very useful when building with CT
 # Usage
 
 ```
-ctm verify - will validate the files in your current directory
+ctm verify # will validate the files in your current directory
 ```
 
 ```
-ctm deploy - will deploy your files assuming they are correct to upstream ctm servers
+ctm deploy # will deploy your files assuming they are correct to upstream ctm servers
 ```
 
 ```
-# ctm create - will create a new directory and initialize a new git repo for you
+ctm create:lambda -h # will create a new directory and initialize a new git repo for you
 usage: ctm create [-h] -n NAME [-p PATH]
 
 options:
@@ -23,33 +23,24 @@ options:
 ```
 
 ```
-ctm create-repo -n get-email -p `pwd`
-Created project folder: /Users/taf2/work/get-email
-Initialized empty Git repository in /Users/taf2/work/get-email/.git/
-Initialized Git repository in /Users/taf2/work/get-email
-Installed post-push script in /Users/taf2/work/get-email/.git/hooks/post-push
-Installed pre-commit script in /Users/taf2/work/get-email/.git/hooks/pre-commit
-Please visit https://app.ctmdev.us/accesscode and enter the code WQOT-BOON
-Waiting for user authorization...
-Waiting for user authorization...
-Project ready for development.
+ctm reset:credentials -n my-project -h # will reset the credentials stored for the current project
+usage: ctm reset:credentials [-h] [-n NAME]
 
-cd get-email
+options:
+  -h, --help            show this help message and exit
+  -n NAME, --name NAME  Project name
 ```
 
+example usage
+```
+ctm create:lambda -n get-email -p `pwd`
+cd get-email
+  # edit code.js
 
+ctm verify
+ctm deploy
+```
 
-# How it works
-
-We rely on 2 git hooks
-
-pre-commit: 
-  this will validate and verify a few things about your package before it is commited
-
-post-push:
-  when you push to one of the following branches release-production, release-staging, or release-development
-  information as you have versioned in config.yml will be uploaded via API to the specific instance of CTM and
-  provision your new code
 
 # dependencies
 
