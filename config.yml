@@ -7,7 +7,7 @@ base_object:
   mode: null
   name: Sample Function
   packages: &id002
-  - layer_arn: arn:aws:lambda:us-east-1:580674011299:layer:jsforce-1_10_1:1
+  - layer_arn: arn:aws:lambda:us-east-1:580674011299:layer:jsforce-1_11_0:1
   runtime: nodejs
   variables: &id003
   - name: Dude
