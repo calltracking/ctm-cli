@@ -279,6 +279,52 @@ def create_new_repo(name: str, path: str):
     store_access_token(name, token_info)
     print("Creating new project...")
 
+    host = 'app.calltrackingmetrics.com'
+    access_token = token_info['access_token']
+
+    # verify the account supports lambdas
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+    url = f"https://{host}/api/v1/accounts/current"
+    response = requests.get(url, headers=headers)
+
+    # You can check the response status code and content if needed
+    print(response.status_code)
+    print(response.content)
+    plan_name = json.loads(response.content)['plan']
+
+    # now given the plan we need to check for lambda support
+    url = f"https://{host}/api/v1/plans/features"
+    response = requests.get(url, headers=headers)
+    print(response.status_code)
+    print(response.content)
+    # find the flag == 'lambda' within {"features" : { "contact_center": [ { "plans": [ { "field_name": "plan_name", "enabled": true|false },... ] }, ... ] } }
+    features = json.loads(response.content)['features']
+    contact_center_features = features['contact_center']
+
+    # First, filter out the plan features for 'lambda'
+    lambda_features = [x for x in contact_center_features if x['flag'] == 'lambda']
+
+    if not lambda_features:
+        raise ValueError("No lambda plans found")
+
+    # Now, filter out the specific plan with the desired plan_name
+    specific_plan = [x for x in lambda_features[0]['plans'] if x['field_name'] == plan_name]
+
+    if not specific_plan:
+        raise ValueError("No specific plan found")
+
+    # Check if the plan is enabled
+    is_lambda_supported = specific_plan[0]['enabled']
+
+    print(is_lambda_supported)
+    if not is_lambda_supported:
+        print(f"Your account plan {plan_name} does not support lambdas.  Please upgrade your account plan to enable lambda function support.")
+        return
+
     project_path = os.path.join(path, name)
     create_project_folder(project_path)
     initialize_git(project_path)
@@ -334,17 +380,25 @@ def poll_for_access_token(client_id: str, device_info: dict) -> str:
             time.sleep(interval)
 
 def store_access_token(name: str, value: dict):
-    if 'expires_in' in value:
-        value['expires_at'] = int(time.time()) + value['expires_in']
-    token_info_str = json.dumps(value)
-    keyring.set_password(KEYRING_SERVICE_PREFIX + name, 'token_info', token_info_str)
+    try:
+        if 'expires_in' in value:
+            value['expires_at'] = int(time.time()) + value['expires_in']
+        token_info_str = json.dumps(value)
+        keyring.set_password(KEYRING_SERVICE_PREFIX + name, 'token_info', token_info_str)
+    except keyring_api.Error as e:
+        print(f"An error occurred while fetching the access token: {e}")
+        None
 
 def get_access_token(name: str) -> str:
-    prefix = KEYRING_SERVICE_PREFIX
-    print(f"Read access token for {prefix}{name} in keychain")
-    token_info_str = keyring.get_password(KEYRING_SERVICE_PREFIX + name, 'token_info')
-    print(f"token_info_str: {token_info_str}")
-    return json.loads(token_info_str) if token_info_str else None
+    try:
+        prefix = KEYRING_SERVICE_PREFIX
+        print(f"Read access token for {prefix}{name} in keychain")
+        token_info_str = keyring.get_password(KEYRING_SERVICE_PREFIX + name, 'token_info')
+        print(f"token_info_str: {token_info_str}")
+        return json.loads(token_info_str) if token_info_str else None
+    except keyring_api.Error as e:
+        print(f"An error occurred while fetching the access token: {e}")
+        None
 
 
 def create_project_folder(project_path: str):

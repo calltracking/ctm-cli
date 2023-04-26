@@ -22,7 +22,7 @@ development:
     credentials: *id001
     description: Lookup insight about the account given a GPT question
     exec_type: trigger
-    id: LDA8CA4483EED6CEF9EA0E0D4EDCFC4A89D6F43C0096467A7F3
+    id: LDA8CA4483EED6CEF9EA0E0D4EDCFC4A89DC8123F0F81E18FCC
     mode: null
     name: Sample Function
     packages: *id002
