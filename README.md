@@ -31,11 +31,28 @@ sudo mv ctm /usr/local/bin/
 ctm version
 ```
 
-On macOS, if Gatekeeper blocks the binary the first time you run it, clear the
-quarantine attribute:
+#### macOS: “ctm” Not Opened
+
+The `ctm` binary is not yet signed with an Apple developer certificate, and
+macOS quarantines files downloaded with a browser. If you downloaded the
+archive in Safari or Chrome, the first run is blocked with a dialog saying
+Apple could not verify `ctm` is free of malware. Click **Done** (not Move to
+Trash), then either:
+
+- remove the quarantine attribute and run it again:
+
+  ```sh
+  xattr -d com.apple.quarantine /usr/local/bin/ctm
+  ```
+
+- or open **System Settings → Privacy & Security**, scroll to the message
+  that `ctm` was blocked, and choose **Open Anyway**.
+
+Downloads made from the command line are not quarantined and skip this
+dialog entirely:
 
 ```sh
-xattr -d com.apple.quarantine /usr/local/bin/ctm
+curl -sLO https://github.com/calltracking/ctm-cli/releases/download/v<version>/ctm_<version>_darwin_arm64.tar.gz
 ```
 
 ### Windows
