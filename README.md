@@ -20,8 +20,8 @@ somewhere on your `PATH`.
 | macOS   | Intel                 | `ctm_<version>_darwin_amd64.tar.gz` |
 | Linux   | x86-64                | `ctm_<version>_linux_amd64.tar.gz`  |
 | Linux   | ARM64                 | `ctm_<version>_linux_arm64.tar.gz`  |
-| Windows | x86-64                | `ctm_<version>_windows_amd64.tar.gz` |
-| Windows | ARM64                 | `ctm_<version>_windows_arm64.tar.gz` |
+| Windows | x86-64                | `ctm_<version>_windows_amd64.zip`   |
+| Windows | ARM64                 | `ctm_<version>_windows_arm64.zip`   |
 
 ### macOS / Linux
 
@@ -40,10 +40,8 @@ xattr -d com.apple.quarantine /usr/local/bin/ctm
 
 ### Windows
 
-`tar` is built into Windows 10 and later:
-
 ```powershell
-tar -xzf ctm_<version>_windows_amd64.tar.gz
+Expand-Archive ctm_<version>_windows_amd64.zip
 ```
 
 Move `ctm.exe` to a directory on your `PATH`, then run `ctm version` in a new
