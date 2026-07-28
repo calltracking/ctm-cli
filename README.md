@@ -169,6 +169,28 @@ Every command that returns data supports:
 - `--no-color` — disable colored output (color is also skipped automatically
   when output is not a terminal)
 
+## API schema
+
+Every release attaches the GraphQL schemas the binaries were generated from:
+
+- `schema.graphql` — the authenticated API served at `/graphql`
+- `public_schema.graphql` — the unauthenticated public API served at
+  `/public_graphql`
+
+They are the exact API contract for that release (and are listed in
+`checksums.txt` like every other asset). The latest schema is always at a
+stable URL:
+
+```sh
+curl -sLO https://github.com/calltracking/ctm-cli/releases/latest/download/schema.graphql
+```
+
+Use them to power your own tooling — code generation (`graphql-codegen`,
+Apollo), IDE autocompletion via `graphql-config`, or query linting — instead
+of hand-rolling an introspection dump. Diffing the schema between two
+releases (for example with `graphql-inspector diff`) shows exactly how the
+API changed from one CLI version to the next.
+
 ## Environment variables
 
 | Variable           | Purpose                                                  |
