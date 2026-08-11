@@ -214,17 +214,65 @@ flags. A few examples:
 ctm viewer
 
 # View your account
-ctm account view
+ctm account view 12345
 
 # List tracking sources
-ctm account tracking-sources list
+ctm account tracking-sources list 12345
 
 # List users, as a table with selected columns
-ctm account users list --output table --fields id,email,name
+ctm account users list 12345 --output table --fields id,email,name
 
 # List virtual phone numbers as CSV
-ctm account virtual-phone-numbers list --output csv --fields id,number
+ctm account virtual-phone-numbers list 12345 --output csv --fields id,number
 ```
+
+Most commands take an account id as their first argument, because a token can
+reach more than one account. `ctm viewer` is the exception — it describes the
+signed-in user, not an account.
+
+### Object IDs
+
+Wherever a command takes an id, you can use any of these. They all work, so
+use whichever you already have:
+
+```sh
+# The numeric account id, as shown in the CTM app and the v1 REST API
+ctm account tracking-sources list 12345
+
+# The opaque id from a CTM web app URL
+ctm account tracking-source view 12345 TSOF6FC2D2594D22C52C7F22FA76C7AEAFA21FB8F34CCCFFF30
+
+# The id this API returns
+ctm account tracking-source view Z2lkOi8vY3RtL0FjY291bnQvMTIzNDU Z2lkOi8vY3RtL1RyYWNraW5nU291cmNlLzk4NzY1NA
+
+# ...which is base64, and also accepted unencoded
+ctm account tracking-source view 'gid://ctm/Account/12345' 'gid://ctm/TrackingSource/987654'
+```
+
+The ids in API responses are always the last form — a global id, unique across
+every object type. **Treat them as opaque strings.** Hold them and pass them
+back; do not parse them, build them by hand, or compare them numerically. The
+encoding is not part of the contract and may change.
+
+Two behaviors to expect:
+
+- **Ids are type-checked.** Passing a tracking source id where a user is
+  expected returns "not found" rather than quietly loading the user that
+  happens to share that number.
+- **The plain number is the only ambiguous form**, since nothing in `12345`
+  says what it is. It works because the command already knows what it is
+  asking for. Prefer global ids in scripts.
+
+If you need the plain numeric id back — to cross-reference the v1 REST API, a
+spreadsheet, or an existing export — select `legacyId` alongside `id`:
+
+```sh
+ctm account users list 12345 --output table --fields id,legacyId,email
+```
+
+`legacyId` is returned as a string of digits, not a JSON number, because ids
+can exceed what JSON numbers represent exactly. In JavaScript, parse it with
+`BigInt()` rather than `Number()`.
 
 ### Running your own GraphQL
 
