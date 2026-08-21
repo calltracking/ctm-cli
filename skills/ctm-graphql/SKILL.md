@@ -33,8 +33,26 @@ API yet — for those, use the v1 REST API documented at
 ## Before Doing Anything
 
 1. `ctm version` — confirm the CLI is installed and note the version. If
-   not installed, download it from the
+   not installed, run the installer (it verifies checksums; re-running it
+   upgrades only the copy in its own target directory, `~/.local/bin` by
+   default). Download it to a file first rather than piping into `sh` — a
+   pipe reports only `sh`'s exit status, so a failed download would look
+   like a successful install to automation:
+
+   ```bash
+   installer=$(mktemp) \
+     && curl -fsSL -o "$installer" https://cli.ctm.com/install.sh \
+     && sh "$installer" \
+     && rm -f "$installer"
+   ```
+
+   On macOS with Homebrew, `brew install calltracking/tap/ctm` works too;
+   builds are also on the
    [releases page](https://github.com/calltracking/ctm-cli/releases).
+   An existing Homebrew or system-wide `ctm` upgrades through whatever
+   installed it (`brew upgrade ctm`), not through this script — after
+   installing, check that `command -v ctm` resolves to the copy you expect,
+   since an older binary earlier in PATH still wins.
    This skill tracks the **latest** release: on an older binary, a command
    this skill names (such as `ctm auth token`) or a typed command for a
    newer schema field may not exist yet. When something described here is
