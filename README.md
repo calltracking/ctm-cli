@@ -155,6 +155,34 @@ export CTM_API_TOKEN=YOUR_TOKEN
 ctm auth check
 ```
 
+### Getting a token for direct HTTP requests
+
+If you (or a script or AI agent) want to talk to the GraphQL API directly —
+with `curl`, an HTTP library, or GraphQL tooling — don't build the
+`Authorization` header from your long-lived API token. Ask the CLI for a
+short-lived bearer token instead:
+
+```bash
+set -o pipefail   # Bash/zsh/ksh; POSIX sh rejects pipefail
+ENDPOINT=$(ctm auth check | sed -n 's/^Endpoint: //p')
+ctm auth token --endpoint "$ENDPOINT" \
+  | sed 's/^/Authorization: Bearer /' \
+  | curl -s --fail-with-body "$ENDPOINT" -H @- \
+      -H "Content-Type: application/json" \
+      -d '{"query": "query Viewer { viewer { id email } }"}'
+```
+
+Piping the header through stdin (`-H @-`) keeps the token out of the
+process argument list, where `ps` or a traced script could expose it.
+
+`ctm auth token` resolves whichever credential the CLI would use (see below)
+and prints only the bearer token, so it composes straight into a header. The
+token expires after about an hour — capture it once per batch of requests
+and re-run the command when a request comes back unauthorized. Send it only
+to the endpoint the CLI resolved it for (`ctm auth check` prints it). The
+long-lived Basic Authentication Token never appears in your command line,
+shell history, or logs.
+
 ### Which credential gets used
 
 When more than one is available, the CLI picks the first of:
@@ -336,6 +364,42 @@ Apollo), IDE autocompletion via `graphql-config`, or query linting — instead
 of hand-rolling an introspection dump. Diffing the schema between two
 releases (for example with `graphql-inspector diff`) shows exactly how the
 API changed from one CLI version to the next.
+
+## Agent skills
+
+If an AI coding agent (Claude Code, Codex, or a compatible tool) works with
+the CTM API on your behalf, install the skill from the
+[`skills/`](skills/) directory. A skill is a plain Markdown playbook the
+agent loads when the task matches; [`skills/ctm-graphql/SKILL.md`](skills/ctm-graphql/SKILL.md)
+teaches an agent to:
+
+- work schema-first: derive GraphQL operations from the released
+  `schema.graphql` and send them directly over HTTP with a short-lived
+  token from `ctm auth token`, or use the CLI's typed commands and
+  `ctm exec` for scripts — never hand-rolling auth headers from the
+  long-lived API token
+- write correct GraphQL operations: named operations with variables,
+  account nesting, connection pagination, and sorting
+- handle CTM API conventions that agents otherwise get wrong: opaque global
+  ids and `legacyId`, strict timeframe scalars, and exact money values
+- confirm with you before running mutations against live account
+  configuration
+
+For Claude Code, copy the skill into your project (or into
+`~/.claude/skills/` to enable it everywhere):
+
+```sh
+mkdir -p .claude/skills
+curl -sL --create-dirs -o .claude/skills/ctm-graphql/SKILL.md \
+  https://raw.githubusercontent.com/calltracking/ctm-cli/master/skills/ctm-graphql/SKILL.md
+```
+
+Other agents can use the same file wherever they load skills or custom
+instructions from.
+
+The skills are maintained alongside the CLI and schemas in the CTM source
+repository and synced here on every release, so the copy on `master` always
+matches the latest released binary and schema.
 
 ## Environment variables
 
