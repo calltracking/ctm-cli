@@ -10,6 +10,31 @@ This repository hosts binary releases only. Grab the latest build from the
 
 ## Installation
 
+### Homebrew (macOS)
+
+```sh
+brew install calltracking/tap/ctm
+```
+
+Upgrades come through `brew upgrade` like everything else.
+
+### Quick install (macOS / Linux)
+
+```sh
+curl -fsSL https://cli.ctm.com/install.sh | sh
+```
+
+The [script](install.sh) is republished with every release, pinned to it —
+so it installs the current release's immutable assets (or upgrades a
+previous install in place) after verifying the download against the
+release's `checksums.txt`. It installs to the user-private `~/.local/bin`
+(set `CTM_INSTALL_DIR` to choose another directory, `CTM_VERSION` to pin a
+version) and never uses `sudo` — for a system-wide install use Homebrew
+above. Because the download happens over `curl`, it skips the macOS
+quarantine dialog described below.
+
+### Manual download
+
 Download the archive for your platform from the
 [latest release](../../releases/latest), extract it, and put the `ctm` binary
 somewhere on your `PATH`.
