@@ -13,10 +13,23 @@ This repository hosts binary releases only. Grab the latest build from the
 ### Homebrew (macOS)
 
 ```sh
-brew install calltracking/tap/ctm
+brew install --no-quarantine calltracking/tap/ctm
 ```
 
 Upgrades come through `brew upgrade` like everything else.
+
+`--no-quarantine` is not optional decoration: `ctm` is not yet notarized by
+Apple, and Homebrew flags what it installs as quarantined, so without it the
+first run is blocked with *"Apple could not verify 'ctm' is free of malware."*
+If you already installed and hit that dialog, clear the flag once — no
+reinstall needed:
+
+```sh
+xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/ctm"
+```
+
+See [macOS: "Apple could not verify ctm"](#macos-apple-could-not-verify-ctm)
+for the other ways around it.
 
 ### Quick install (macOS / Linux)
 
@@ -30,8 +43,8 @@ previous install in place) after verifying the download against the
 release's `checksums.txt`. It installs to the user-private `~/.local/bin`
 (set `CTM_INSTALL_DIR` to choose another directory, `CTM_VERSION` to pin a
 version) and never uses `sudo` — for a system-wide install use Homebrew
-above. Because the download happens over `curl`, it skips the macOS
-quarantine dialog described below.
+above. Nothing it downloads is quarantined, so it is the one path that never
+triggers the macOS Gatekeeper prompt described below.
 
 ### Manual download
 
@@ -56,29 +69,38 @@ sudo mv ctm /usr/local/bin/
 ctm version
 ```
 
-#### macOS: “ctm” Not Opened
+### macOS: "Apple could not verify ctm"
 
-The `ctm` binary is not yet signed with an Apple developer certificate, and
-macOS quarantines files downloaded with a browser. If you downloaded the
-archive in Safari or Chrome, the first run is blocked with a dialog saying
-Apple could not verify `ctm` is free of malware. Click **Done** (not Move to
-Trash), then either:
-
-- remove the quarantine attribute and run it again:
-
-  ```sh
-  xattr -d com.apple.quarantine /usr/local/bin/ctm
-  ```
-
-- or open **System Settings → Privacy & Security**, scroll to the message
-  that `ctm` was blocked, and choose **Open Anyway**.
-
-Downloads made from the command line are not quarantined and skip this
-dialog entirely:
+`ctm` is not yet notarized with an Apple Developer certificate, so macOS
+Gatekeeper blocks it whenever the file arrives carrying a quarantine flag.
+Two install paths set that flag: **Homebrew**, which quarantines what it
+installs, and a **browser download** of the release archive. If your first
+run is blocked, click **Done** (not Move to Trash), then clear the flag:
 
 ```sh
-curl -sLO https://github.com/calltracking/ctm-cli/releases/download/v<version>/ctm_<version>_darwin_arm64.tar.gz
+# installed with Homebrew
+xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/ctm"
+
+# installed by hand
+xattr -d com.apple.quarantine /usr/local/bin/ctm
 ```
+
+`ctm version` should work immediately afterwards. Other ways around it:
+
+- Install with `brew install --no-quarantine calltracking/tap/ctm`, which
+  never sets the flag in the first place.
+- Open **System Settings → Privacy & Security**, find the message that `ctm`
+  was blocked, and choose **Open Anyway**.
+- Use the [quick install script](#quick-install-macos--linux), or download the
+  archive from the command line — neither is quarantined:
+
+  ```sh
+  curl -sLO https://github.com/calltracking/ctm-cli/releases/download/v<version>/ctm_<version>_darwin_arm64.tar.gz
+  ```
+
+None of this reflects on the download's integrity: every release ships a
+`checksums.txt` you can verify (see below), and the binaries are built and
+published straight from CI.
 
 ### Windows
 
