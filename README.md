@@ -13,23 +13,19 @@ This repository hosts binary releases only. Grab the latest build from the
 ### Homebrew (macOS)
 
 ```sh
-brew install --no-quarantine calltracking/tap/ctm
-```
-
-Upgrades come through `brew upgrade` like everything else.
-
-`--no-quarantine` is not optional decoration: `ctm` is not yet notarized by
-Apple, and Homebrew flags what it installs as quarantined, so without it the
-first run is blocked with *"Apple could not verify 'ctm' is free of malware."*
-If you already installed and hit that dialog, clear the flag once — no
-reinstall needed:
-
-```sh
+brew install calltracking/tap/ctm
 xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/ctm"
 ```
 
-See [macOS: "Apple could not verify ctm"](#macos-apple-could-not-verify-ctm)
-for the other ways around it.
+Upgrades come through `brew upgrade` like everything else — re-run the `xattr`
+line after each upgrade.
+
+That second line is required today: `ctm` is not yet notarized by Apple, and
+Homebrew flags what it installs as quarantined, so the first run is otherwise
+blocked with *"Apple could not verify 'ctm' is free of malware."* Clearing the
+flag takes effect immediately — no reinstall needed. See
+[macOS: "Apple could not verify ctm"](#macos-apple-could-not-verify-ctm) for
+the alternatives, including install paths that avoid this entirely.
 
 ### Quick install (macOS / Linux)
 
@@ -87,8 +83,6 @@ xattr -d com.apple.quarantine /usr/local/bin/ctm
 
 `ctm version` should work immediately afterwards. Other ways around it:
 
-- Install with `brew install --no-quarantine calltracking/tap/ctm`, which
-  never sets the flag in the first place.
 - Open **System Settings → Privacy & Security**, find the message that `ctm`
   was blocked, and choose **Open Anyway**.
 - Use the [quick install script](#quick-install-macos--linux), or download the
