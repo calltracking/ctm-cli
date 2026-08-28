@@ -46,8 +46,17 @@ API yet — for those, use the v1 REST API documented at
      && rm -f "$installer"
    ```
 
-   On macOS with Homebrew, `brew install calltracking/tap/ctm` works too;
-   builds are also on the
+   On macOS with Homebrew, `brew install calltracking/tap/ctm` works too,
+   but Homebrew marks what it installs as quarantined and `ctm` is not yet
+   notarized, so macOS blocks the first run ("Apple could not verify...").
+   Clear the flag once after installing or upgrading — this is why the
+   installer above is the smoother path on macOS:
+
+   ```bash
+   xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/ctm"
+   ```
+
+   Builds are also on the
    [releases page](https://github.com/calltracking/ctm-cli/releases).
    An existing Homebrew or system-wide `ctm` upgrades through whatever
    installed it (`brew upgrade ctm`), not through this script — after
@@ -70,7 +79,29 @@ If an authenticated operation is needed and no credential works, there are
 two paths:
 
 - **Interactive**: ask the user to run `ctm auth login` themselves — it opens
-  their browser and reuses their CTM session. The token lasts one hour.
+  their browser and reuses their CTM session. The token lasts one hour and is
+  **read-only unless the user checks "Write access required"** on the
+  authorization screen (a read-only token makes mutations fail with a clear
+  error — except the rare mutations whose schema description says they are
+  permitted for read-only tokens — while queries work normally). **Always ask for
+  `ctm auth login --readonly` unless you expect to run mutations** — it pins
+  the token to read-only and hides the write-access option, so the session
+  never holds more access than the work needs. Only when the user has asked
+  for changes that require a mutation should you have them run plain
+  `ctm auth login` and check "Write access required". Do not run
+  `ctm auth login` yourself to capture its `--show-token` output: the sign-in
+  blocks until a person approves the request in the browser, and a captured
+  token is a live credential sitting in your transcript for the rest of its
+  hour. Once the user has signed in, `ctm auth token` hands you the same
+  token through a pipe, with no browser wait.
+- **Remote / agent-driven**: when there is no browser on this machine or the
+  person who can approve is elsewhere (reachable over chat), run
+  `ctm auth login --remote` (add `--readonly` unless you expect to run
+  mutations). It prints a URL and a short code — neither is a credential —
+  which you relay verbatim to the account holder; they approve in their own
+  browser while the command waits, and the token lands in the CLI config
+  without ever passing through you. Then use `ctm auth token` as below. The
+  code expires after 10 minutes; if nobody approves in time, run it again.
 - **Headless / scripts**: set `CTM_API_TOKEN` to the account's Basic
   Authentication Token (found in CTM under **Account Settings → API
   Integration**). Ask the user to provide it through an environment variable
@@ -359,7 +390,10 @@ Apollo) and query linting; and diff between releases (e.g.
 
 - Mutations change live account configuration. Show the user the mutation
   and variables and get confirmation before executing one; prefer read-only
-  queries when exploring.
+  queries when exploring. A `ctm auth login` token only permits mutations
+  when the user checked "Write access required" while authorizing — a
+  mutation rejected as read-only means the user has to sign in again with
+  write access, not that the operation is wrong.
 - GraphQL responses can carry both partial `data` and an `errors` array —
   check both before treating a request as successful.
 - Exports the user asked for (CSV/JSON of reports, numbers, users)
