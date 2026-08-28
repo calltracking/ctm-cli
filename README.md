@@ -144,8 +144,15 @@ two-factor included. Confirm the prompt and the CLI stores the token:
 ```
 Endpoint: https://app.ctm.com/graphql
 Authenticated as jane@example.com (usr123)
+Access: read-only (rerun `ctm auth login` and check "Write access required" to run mutations)
 Token saved to /Users/jane/.ctm.yml and expires Mon, 03 Aug 2026 15:12:02 EDT
 ```
+
+The token is **read-only unless you check "Write access required"** on the
+authorization screen: queries work normally, and mutations fail with a clear
+error until you sign in again with write access. Pass `--readonly` to pin the
+token to read-only — the write-access option is then not offered at all, which
+is the right default when an AI agent will be running the commands.
 
 The token lasts one hour; run `ctm auth login` again to renew it. It is also
 tied to the endpoint that issued it, so a token from a sandbox or dev endpoint
@@ -157,14 +164,60 @@ Useful flags:
 | -------------- | ------------------------------------------------------------------- |
 | `--force`      | Sign in again instead of reusing the browser's current CTM session  |
 | `--no-browser` | Print the URL instead of launching a browser                        |
+| `--readonly`   | Pin the token to read-only; the write-access option is not offered   |
+| `--show-token` | Also print the bearer token on stdout, like `ctm auth token`         |
+| `--remote`     | Sign in with no browser on this machine — see below                  |
 | `--endpoint`   | Sign in against a specific endpoint, and store it as the default    |
 | `--timeout`    | How long to wait for you to finish in the browser (default `3m`)    |
 
 `--no-browser` is for when the CLI cannot open a browser for you, not for
 signing in from a different machine: the browser has to reach `127.0.0.1` on the
 machine running `ctm`. Over SSH that means forwarding the port the command
-prints (`ssh -L`). On a host where that is impractical, use an API token
-instead.
+prints (`ssh -L`). On a host where that is impractical, use `--remote` (below)
+or an API token.
+
+`--show-token` additionally prints the bearer token — and nothing else — on
+stdout, moving the sign-in progress to stderr, so a sign-in and the header it
+produces compose into one step. Treat the printed value as the secret it is:
+pipe it into its consumer rather than capturing it into a variable or log.
+
+### Signing in from a machine with no browser
+
+```sh
+ctm auth login --remote
+```
+
+A device-code sign-in for when `ctm` runs somewhere no browser can open — an
+AI agent on a build box, a container, an SSH session — and the person who can
+approve is somewhere else entirely. The command prints a URL and a short code:
+
+```
+Ask the account holder to open:
+
+  https://app.ctm.com/cli/device
+
+and enter the code:
+
+  BCDF-GHJK
+
+Waiting for approval; the code expires in 10m0s.
+```
+
+Relay exactly that message — **neither the URL nor the code is a secret**.
+The account holder opens the page in any browser, signs in normally (SSO and
+two-factor included), types the code, reviews who requested it (including the
+requesting machine's IP), and approves or denies. The CLI waits, then verifies
+and stores the token exactly as the browser sign-in does. The token itself is
+never printed and never crosses the chat: a script or agent follows up with
+`ctm auth token`. Approval also sends the account holder a notification email
+naming the requester.
+
+Codes are single-use, expire after 10 minutes, and must be typed by hand on
+the approval page — a link can never arrive pre-armed for one click. The same
+read-only rules apply: the approver chooses whether to grant write access, and
+`--remote --readonly` pins the token so the option is not offered. `--force`,
+`--no-browser`, `--show-token`, and `--timeout` do not apply to `--remote`;
+the wait lasts until the code expires.
 
 To sign out, drop the stored token:
 
@@ -217,7 +270,10 @@ Piping the header through stdin (`-H @-`) keeps the token out of the
 process argument list, where `ps` or a traced script could expose it.
 
 `ctm auth token` resolves whichever credential the CLI would use (see below)
-and prints only the bearer token, so it composes straight into a header. The
+and prints only the bearer token, so it composes straight into a header. It
+never opens a browser: with no usable credential it fails and names the fix —
+when the credential still has to be established on a browserless machine,
+`ctm auth login --remote` is the sign-in half of this pattern. The
 token expires after about an hour — capture it once per batch of requests
 and re-run the command when a request comes back unauthorized. Send it only
 to the endpoint the CLI resolved it for (`ctm auth check` prints it). The
