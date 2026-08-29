@@ -102,6 +102,78 @@ two paths:
   browser while the command waits, and the token lands in the CLI config
   without ever passing through you. Then use `ctm auth token` as below. The
   code expires after 10 minutes; if nobody approves in time, run it again.
+
+  When your session only needs the bearer token for direct HTTP requests,
+  prefer `ctm auth login --agent`: the same relayed approval, pinned
+  read-only, but the verified token is printed bare on stdout and **never
+  written to any config file**. Capture it straight into a private header
+  file rather than echoing it. Shell variables do not survive a fresh
+  shell per command, so nothing here relies on one: `mktemp` runs bare so
+  its unique path is printed for you to remember (it creates the file
+  `0600`), and the host is written out literally in both commands so the
+  token is always minted for the host it is sent to:
+
+  ```bash
+  mktemp   # prints e.g. /tmp/tmp.k3vAx1 - remember it across your calls
+  # pipefail shares the login's command line on purpose: set state dies with
+  # a fresh shell just like variables do. Without it a denied or expired
+  # sign-in exits through sed's zero status, leaving an empty header file
+  # and an unexplained 401 later.
+  set -o pipefail; ctm auth login --agent --endpoint https://app.ctm.com/graphql \
+    | sed 's/^/Authorization: Bearer /' > /tmp/tmp.k3vAx1
+  curl -s --fail-with-body https://app.ctm.com/graphql -H @/tmp/tmp.k3vAx1 \
+    -H "Content-Type: application/json" -d @request.json
+  rm -f /tmp/tmp.k3vAx1   # when the session ends
+  ```
+
+  With `--no-config` in effect the `--endpoint` flag selects the host for
+  this run without storing anything. Since nothing is stored, an `--agent`
+  sign-in also cannot hijack the identity of other `ctm` processes on a
+  shared machine.
+
+  `--agent` always pins the token read-only. When the session's purpose is
+  a **mutation** over direct HTTP, use the unpinned ephemeral form —
+  `ctm auth login --remote --show-token --no-config --endpoint <host>`,
+  with the same literal host as your requests — and ask the approver to
+  check "Write access required" on the approval page; otherwise the token
+  they grant cannot run it.
+
+  When the session instead needs the typed `ctm` commands (which read the
+  credential from the config), scope the stored login to the same private
+  temp config on every invocation. Create the directory once with
+  `mktemp -d` — never a fixed name like `/tmp/agent-session`, which another
+  user on a shared host can pre-create and own, swapping the config out
+  from under you — and remember the unique path it prints. In most agent
+  harnesses each command runs in a fresh shell, so an `export` made
+  alongside the sign-in is gone by the next call and `ctm` silently falls
+  back to `~/.ctm.yml` — prefix every command with the remembered path
+  instead (or use `--config`):
+
+  ```bash
+  mktemp -d      # prints e.g. /tmp/tmp.x1QZk3vA - remember it
+  CTM_CONFIG=/tmp/tmp.x1QZk3vA/ctm.yml ctm auth login --remote
+  CTM_CONFIG=/tmp/tmp.x1QZk3vA/ctm.yml ctm account users list 12345
+  ```
+
+  (In a genuinely persistent shell a single
+  `export CTM_CONFIG=$(mktemp -d)/ctm.yml` works.)
+
+  A fresh config also starts with no endpoint. If the target host lives in
+  `~/.ctm.yml` as `api_endpoint` rather than in `CTM_API_ENDPOINT`, the
+  session config hides it and the sign-in silently targets the production
+  default — pass `--endpoint <host>` on the login, which stores it in the
+  session config for every later call.
+
+  The prefix belongs on **every** `ctm` invocation for the rest of the
+  session, not just the login — including the `ctm auth check` and
+  `ctm auth token` calls in the request examples below, which are written
+  for the default config. A bare invocation reads `~/.ctm.yml` instead and
+  either fails or runs as whatever unrelated credential is stored there.
+  Delete the file when the session ends. This matters on a shared machine:
+  a stored login outranks `CTM_API_TOKEN` until it expires, so signing in
+  against the default `~/.ctm.yml` would silently switch identity for
+  every other `ctm` process relying on that exported token. Never print or
+  read the config file itself — it holds the live token.
 - **Headless / scripts**: set `CTM_API_TOKEN` to the account's Basic
   Authentication Token (found in CTM under **Account Settings → API
   Integration**). Ask the user to provide it through an environment variable
