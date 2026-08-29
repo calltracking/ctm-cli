@@ -166,7 +166,9 @@ Useful flags:
 | `--no-browser` | Print the URL instead of launching a browser                        |
 | `--readonly`   | Pin the token to read-only; the write-access option is not offered   |
 | `--show-token` | Also print the bearer token on stdout, like `ctm auth token`         |
+| `--no-config`  | Never write the config; print-only (requires `--show-token`)          |
 | `--remote`     | Sign in with no browser on this machine — see below                  |
+| `--agent`      | Ephemeral: `--remote --readonly --show-token --no-config` — see below |
 | `--endpoint`   | Sign in against a specific endpoint, and store it as the default    |
 | `--timeout`    | How long to wait for you to finish in the browser (default `3m`)    |
 
@@ -178,8 +180,11 @@ or an API token.
 
 `--show-token` additionally prints the bearer token — and nothing else — on
 stdout, moving the sign-in progress to stderr, so a sign-in and the header it
-produces compose into one step. Treat the printed value as the secret it is:
-pipe it into its consumer rather than capturing it into a variable or log.
+produces compose into one step. The credential is still stored as usual unless
+`--no-config` is also given, which skips the store entirely (and therefore
+requires `--show-token` — stdout is then the only place the token goes). Treat
+the printed value as the secret it is: pipe it into its consumer rather than
+capturing it into a variable or log.
 
 ### Signing in from a machine with no browser
 
@@ -215,9 +220,30 @@ naming the requester.
 Codes are single-use, expire after 10 minutes, and must be typed by hand on
 the approval page — a link can never arrive pre-armed for one click. The same
 read-only rules apply: the approver chooses whether to grant write access, and
-`--remote --readonly` pins the token so the option is not offered. `--force`,
-`--no-browser`, `--show-token`, and `--timeout` do not apply to `--remote`;
-the wait lasts until the code expires.
+`--remote --readonly` pins the token so the option is not offered. `--force`
+and `--no-browser` do not combine with `--remote`, and `--show-token` combines
+with it only together with `--no-config` (the ephemeral form below); the wait
+lasts until the code expires, so `--timeout` does not apply.
+
+### Ephemeral agent sessions
+
+```sh
+TOKEN=$(ctm auth login --agent)
+```
+
+`--agent` is shorthand for `--remote --readonly --show-token --no-config`: the
+device flow above, pinned read-only, with the relay message and summary on
+stderr and the bare verified token on stdout — **never written to any config
+file**. The credential exists only where the caller put it, so an agent that
+needs the token just for its own session holds it in memory and nothing
+lingers on disk. Because nothing is stored, the login also cannot outrank an
+exported `CTM_API_TOKEN` for other processes on a shared machine.
+
+If the server ignores the read-only pin (an older release), the command fails
+without printing the token rather than handing an automated caller more access
+than it asked for. When the session's purpose is a mutation, use the unpinned
+long form — `ctm auth login --remote --show-token --no-config` — and ask the
+approver to check "Write access required" on the approval page.
 
 To sign out, drop the stored token:
 
