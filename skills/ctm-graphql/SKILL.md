@@ -1,6 +1,6 @@
 ---
 name: ctm-graphql
-description: Use when working with the CallTrackingMetrics (CTM) API — writing GraphQL queries or mutations against the CTM GraphQL API, making direct HTTP requests to it, running ctm CLI commands, exporting report, tracking source, user, or phone number data, or automating CTM account management from scripts and agents.
+description: Use when working with the CallTrackingMetrics (CTM) API — writing GraphQL queries or mutations against the CTM GraphQL API, making direct HTTP requests to it, running ctm CLI commands, accessing call, text, form, report, tracking source, user, or phone number data, or automating CTM account management from scripts and agents.
 ---
 
 # CTM GraphQL API & CLI
@@ -26,9 +26,10 @@ Basic Authentication Token — let the CLI hold and exchange it.
 The GraphQL conventions below (operations, ids, pagination, timeframes,
 money) apply identically to both paths.
 
-Individual call and activity records are not exposed through this GraphQL
-API yet — for those, use the v1 REST API documented at
-<https://www.calltrackingmetrics.com/developers/>.
+Customer phone calls, text messages, and form submissions are exposed as
+account-scoped `Activity` values. Activity lists and typed reads come from
+Elasticsearch activity history; outbound texts use the existing CTM
+delivery workflow.
 
 ## Before Doing Anything
 
@@ -302,6 +303,118 @@ file, or log.
 - Default is `--output pretty` (colorized JSON); color is skipped
   automatically when output is not a terminal.
 
+## Customer Activities
+
+`Activity` is a GraphQL interface implemented by `PhoneCall`,
+`TextMessage`, and `FormSubmission`. Its `id` and `legacyId` identify the
+underlying Call activity record. A text's separate Message identity is in
+`messageId`; a form's configured reactor identity is in `formId`.
+
+The generated CLI can list the common activity fields and read each concrete
+kind (including call transcript and summary):
+
+```bash
+ctm account activities list ACCOUNT_ID \
+  --all --kinds PHONE_CALL,TEXT_MESSAGE \
+  --start-at 2026-08-01T00:00:00Z \
+  --end-at 2026-09-01T00:00:00Z \
+  --order OCCURRED_AT --sort-mode DESC
+
+ctm account activity view ACCOUNT_ID ACTIVITY_ID
+ctm account phone-call view ACCOUNT_ID ACTIVITY_ID
+ctm account text-message view ACCOUNT_ID ACTIVITY_ID
+ctm account form-submission view ACCOUNT_ID ACTIVITY_ID
+```
+
+List output contains fields common to every activity. Use `ctm exec` with
+inline fragments when one result set needs concrete fields, including form
+custom fields:
+
+```graphql
+query CustomerActivity(
+  $accountId: ID!
+  $first: Int!
+  $after: String
+  $kinds: [ActivityKind!]
+  $startAt: Instant
+  $endAt: Instant
+) {
+  account(id: $accountId) {
+    activities(
+      first: $first
+      after: $after
+      kinds: $kinds
+      startAt: $startAt
+      endAt: $endAt
+      order: OCCURRED_AT
+      sortMode: DESC
+    ) {
+      nodes {
+        __typename
+        id
+        legacyId
+        occurredAt
+        direction
+        contactName
+        contactNumber
+        ... on PhoneCall {
+          fromNumber
+          toNumber
+          status
+          durationSeconds
+          talkTimeSeconds
+          transcription
+          summary
+        }
+        ... on TextMessage {
+          messageId
+          fromNumber
+          toNumber
+          body
+          status
+        }
+        ... on FormSubmission {
+          formId
+          formName
+          submitterName
+          submitterEmail
+          callbackNumber
+          fields { id label labels value }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+```
+
+The activity connection is forward-only search-after pagination. Use
+`first`/`after` or the generated command's `--all`; `last` and `before` are
+not supported. `startAt` and `endAt` are inclusive exact instants. Results
+and fields honor account membership, call-log visibility, text access, and
+audio access; a null transcript, summary, body, or phone field can therefore
+mean either absent data or restricted visibility.
+
+To queue a text, use the named mutation through `ctm exec` (or direct
+GraphQL). This requires a login authorized for write access, an SMS-enabled
+account and agency, and call-log access to texts:
+
+```graphql
+mutation SendCustomerText($input: SendTextMessageInput!) {
+  sendTextMessage(input: $input) {
+    messageId
+    activityId
+    status
+    errors
+  }
+}
+```
+
+Pass `accountId`, `toNumber`, `body`, and optionally
+`fromTrackingNumberId` or `statusCallbackUrl`. Always inspect the payload's
+`errors` even when the HTTP request itself succeeds. The text `activityId`
+may be null until background processing creates its Call activity record.
+
 ## Object IDs
 
 - `id` values in API responses are **opaque global ids**, unique across
@@ -383,15 +496,15 @@ Rules for the documents themselves:
   whenever you pass either — each collection declares its own defaults and
   the default direction is not uniform across collections. Read the
   declared defaults from the schema file rather than assuming.
-- Some collections (`accounts`, `users`, `virtualPhoneNumbers`) default to
+- Some collections (`accounts`, `activities`, `users`, `virtualPhoneNumbers`) default to
   `order: RELEVANCE`, which ranks by search score against `filter`;
   `sortMode` never affects the ranking itself. What happens on tied scores
-  differs: `accounts` and `virtualPhoneNumbers` fall back to a fixed
-  newest-first tie breaker, while `users` falls back to a user-ID tie
-  breaker that does follow `sortMode` — so on an unfiltered `users` list
-  the direction still changes the order. Relevance is only meaningful when
-  `filter` is set; when listing without search text, name the column you
-  actually want.
+  differs: `accounts`, `activities`, and `virtualPhoneNumbers` fall back to
+  a fixed newest-first tie breaker, while `users` falls back to a user-ID
+  tie breaker that does follow `sortMode` — so on an unfiltered `users`
+  list the direction still changes the order. Relevance is only meaningful
+  when `filter` is set; when listing without search text, name the column
+  you actually want.
 - Enum values are UPPER_SNAKE (`NAME`, `UPDATED_AT`, `ASC`); field and
   argument names are camelCase.
 
