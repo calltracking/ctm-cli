@@ -310,6 +310,14 @@ file, or log.
 underlying Call activity record. A text's separate Message identity is in
 `messageId`; a form's configured reactor identity is in `formId`.
 
+When a request names a call or call ID, read it directly with
+`ctm account phone-call view ACCOUNT_ID ACTIVITY_ID`. When the request names
+an activity whose kind is unknown, use `ctm account activity view` first,
+then read the corresponding typed record. Do not fall back to the v1 REST
+API merely because the underlying record is called a Call; consider v1 only
+after confirming the requested data is absent from the current schema that
+matches the installed CLI.
+
 The generated CLI can list the common activity fields and read each concrete
 kind (including call transcript and summary):
 
