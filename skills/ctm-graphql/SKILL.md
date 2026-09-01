@@ -12,9 +12,9 @@ here:
 
 - **Direct GraphQL over HTTP (preferred)**: download the published
   `schema.graphql`, derive your operations from it, and `POST` them to the
-  API with a short-lived bearer token from `ctm auth token`. This gives
-  you the full schema with any GraphQL tooling, while the CLI stays the
-  custodian of the long-lived credential.
+  API with a short-lived bearer token from the applicable CLI login flow
+  below. This gives you the full schema with any GraphQL tooling without
+  handling a long-lived credential directly.
 - **The `ctm` CLI** (<https://github.com/calltracking/ctm-cli>): typed
   commands generated from the schema, plus `ctm exec` to run a GraphQL
   document without handling tokens at all. Best for shell scripts,
@@ -33,166 +33,126 @@ delivery workflow.
 
 ## Before Doing Anything
 
-1. `ctm version` — confirm the CLI is installed and note the version. If
-   not installed, run the installer (it verifies checksums; re-running it
-   upgrades only the copy in its own target directory, `~/.local/bin` by
-   default). Download it to a file first rather than piping into `sh` — a
-   pipe reports only `sh`'s exit status, so a failed download would look
-   like a successful install to automation:
+First determine whether `ctm` is already installed locally:
+
+```bash
+command -v ctm
+```
+
+### Existing local installation
+
+1. Record the installed version and resolve the latest release before using
+   the CLI:
 
    ```bash
-   installer=$(mktemp) \
-     && curl -fsSL -o "$installer" https://cli.ctm.com/install.sh \
-     && sh "$installer" \
-     && rm -f "$installer"
+   installed_version=$(ctm version | sed -n '1s/^ctm //p')
+   latest_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+     https://github.com/calltracking/ctm-cli/releases/latest)
+   latest_version=${latest_url##*/}
+   latest_version=${latest_version#v}
+   printf 'installed=%s latest=%s\n' "$installed_version" "$latest_version"
    ```
 
-   On macOS with Homebrew, `brew install calltracking/tap/ctm` works too,
-   but Homebrew marks what it installs as quarantined and `ctm` is not yet
-   notarized, so macOS blocks the first run ("Apple could not verify...").
-   Clear the flag once after installing or upgrading — this is why the
-   installer above is the smoother path on macOS:
+   If the versions differ, tell the user which version is installed and
+   suggest upgrading to the latest release before continuing. Do not replace
+   an existing install automatically. It must be upgraded through the method
+   that installed it, for example `brew upgrade ctm` for Homebrew; standalone
+   builds and instructions are on the
+   [releases page](https://github.com/calltracking/ctm-cli/releases). If the
+   user continues on an older version, use the schema assets from its matching
+   `v<installed_version>` release and do not assume newer commands exist.
 
-   ```bash
-   xattr -dr com.apple.quarantine "$(brew --prefix)/Caskroom/ctm"
-   ```
+2. For authenticated work, use the standard local login flow: run
+   `ctm auth check`, and if it reports no usable credential, have the user run
+   plain `ctm auth login`. Do not substitute `--agent`, `--remote`,
+   `--show-token`, `--no-config`, or `--readonly` for an existing local
+   installation. The authorization page leaves the token read-only unless the
+   user checks **Write access required**; tell them to check it only when the
+   requested mutation requires write access. After login, use `ctm auth token`
+   through a pipe as shown below rather than printing or capturing it.
 
-   Builds are also on the
-   [releases page](https://github.com/calltracking/ctm-cli/releases).
-   An existing Homebrew or system-wide `ctm` upgrades through whatever
-   installed it (`brew upgrade ctm`), not through this script — after
-   installing, check that `command -v ctm` resolves to the copy you expect,
-   since an older binary earlier in PATH still wins.
-   This skill tracks the **latest** release: on an older binary, a command
-   this skill names (such as `ctm auth token`) or a typed command for a
-   newer schema field may not exist yet. When something described here is
-   missing, update the CLI rather than working around it — and if you must
-   stay on an older binary, download the schema assets from the release
-   matching your `ctm version` instead of `latest`, and skip the parts of
-   this skill your version predates.
-2. `ctm auth check` — reports the endpoint and which credential is in
-   play. Skip this (and all credential setup) when the task only needs the
-   unauthenticated public API — `ctm public ...`, `ctm exec --public`, or
-   a direct `POST` to `/public_graphql` — which deliberately requires no
-   token, so an auth failure there is not a blocker.
+Skip authentication when the task only needs the unauthenticated public API:
+`ctm public ...`, `ctm exec --public`, or a direct `POST` to
+`/public_graphql`.
 
-If an authenticated operation is needed and no credential works, there are
-two paths:
+### No local installation
 
-- **Interactive**: ask the user to run `ctm auth login` themselves — it opens
-  their browser and reuses their CTM session. The token lasts one hour and is
-  **read-only unless the user checks "Write access required"** on the
-  authorization screen (a read-only token makes mutations fail with a clear
-  error — except the rare mutations whose schema description says they are
-  permitted for read-only tokens — while queries work normally). **Always ask for
-  `ctm auth login --readonly` unless you expect to run mutations** — it pins
-  the token to read-only and hides the write-access option, so the session
-  never holds more access than the work needs. Only when the user has asked
-  for changes that require a mutation should you have them run plain
-  `ctm auth login` and check "Write access required". Do not run
-  `ctm auth login` yourself to capture its `--show-token` output: the sign-in
-  blocks until a person approves the request in the browser, and a captured
-  token is a live credential sitting in your transcript for the rest of its
-  hour. Once the user has signed in, `ctm auth token` hands you the same
-  token through a pipe, with no browser wait.
-- **Remote / agent-driven**: when there is no browser on this machine or the
-  person who can approve is elsewhere (reachable over chat), run
-  `ctm auth login --remote` (add `--readonly` unless you expect to run
-  mutations). It prints a URL and a short code — neither is a credential —
-  which you relay verbatim to the account holder; they approve in their own
-  browser while the command waits, and the token lands in the CLI config
-  without ever passing through you. Then use `ctm auth token` as below. The
-  code expires after 10 minutes; if nobody approves in time, run it again.
+Install the latest CLI into a unique temporary directory for this session
+only. Never install it into `~/.local/bin`, Homebrew, or another persistent
+location, and never alter the user's `PATH`. Download the installer before
+running it so a failed download cannot be hidden by a shell pipeline:
 
-  When your session only needs the bearer token for direct HTTP requests,
-  prefer `ctm auth login --agent`: the same relayed approval, pinned
-  read-only, but the verified token is printed bare on stdout and **never
-  written to any config file**. Capture it straight into a private header
-  file rather than echoing it. Shell variables do not survive a fresh
-  shell per command, so nothing here relies on one: `mktemp` runs bare so
-  its unique path is printed for you to remember (it creates the file
-  `0600`), and the host is written out literally in both commands so the
-  token is always minted for the host it is sent to:
+```bash
+session_dir=$(mktemp -d)
+curl -fsSL -o "$session_dir/install.sh" https://cli.ctm.com/install.sh
+CTM_INSTALL_DIR="$session_dir/bin" sh "$session_dir/install.sh"
+printf 'Temporary ctm directory: %s\n' "$session_dir"
+```
 
-  ```bash
-  mktemp   # prints e.g. /tmp/tmp.k3vAx1 - remember it across your calls
-  # pipefail shares the login's command line on purpose: set state dies with
-  # a fresh shell just like variables do. Without it a denied or expired
-  # sign-in exits through sed's zero status, leaving an empty header file
-  # and an unexplained 401 later.
-  set -o pipefail; ctm auth login --agent --endpoint https://app.ctm.com/graphql \
-    | sed 's/^/Authorization: Bearer /' > /tmp/tmp.k3vAx1
-  curl -s --fail-with-body https://app.ctm.com/graphql -H @/tmp/tmp.k3vAx1 \
-    -H "Content-Type: application/json" -d @request.json
-  rm -f /tmp/tmp.k3vAx1   # when the session ends
-  ```
+Remember the printed absolute directory. Agent tool calls often start fresh
+shells, so use the absolute binary path (for example
+`/tmp/tmp.x1QZk3vA/bin/ctm`) on every later invocation instead of relying on
+`session_dir` or an exported `PATH`.
 
-  With `--no-config` in effect the `--endpoint` flag selects the host for
-  this run without storing anything. Since nothing is stored, an `--agent`
-  sign-in also cannot hijack the identity of other `ctm` processes on a
-  shared machine.
+Do not use `ctm auth check`, a stored config, `CTM_API_TOKEN`, or the standard
+browser login with this temporary install. Authenticate ephemerally and pipe
+the token directly into a private header file inside the same temporary
+directory:
 
-  `--agent` always pins the token read-only. When the session's purpose is
-  a **mutation** over direct HTTP, use the unpinned ephemeral form —
-  `ctm auth login --remote --show-token --no-config --endpoint <host>`,
-  with the same literal host as your requests — and ask the approver to
-  check "Write access required" on the approval page; otherwise the token
-  they grant cannot run it.
+- For queries and any mutation whose schema explicitly permits a read-only
+  token, use `ctm auth login --agent`. It is shorthand for
+  `--remote --readonly --show-token --no-config`.
+- Only for a mutation that the schema does not permit with a read-only token,
+  use `ctm auth login --remote --show-token --no-config` and tell the approver
+  to check **Write access required**.
 
-  When the session instead needs the typed `ctm` commands (which read the
-  credential from the config), scope the stored login to the same private
-  temp config on every invocation. Create the directory once with
-  `mktemp -d` — never a fixed name like `/tmp/agent-session`, which another
-  user on a shared host can pre-create and own, swapping the config out
-  from under you — and remember the unique path it prints. In most agent
-  harnesses each command runs in a fresh shell, so an `export` made
-  alongside the sign-in is gone by the next call and `ctm` silently falls
-  back to `~/.ctm.yml` — prefix every command with the remembered path
-  instead (or use `--config`):
+Use the same literal endpoint for login and every request. `--show-token`
+owns stdout while the approval URL and short code remain visible on stderr;
+pipe stdout immediately and never print, echo, command-substitute, or otherwise
+capture the live token in the transcript:
 
-  ```bash
-  mktemp -d      # prints e.g. /tmp/tmp.x1QZk3vA - remember it
-  CTM_CONFIG=/tmp/tmp.x1QZk3vA/ctm.yml ctm auth login --remote
-  CTM_CONFIG=/tmp/tmp.x1QZk3vA/ctm.yml ctm account users list 12345
-  ```
+```bash
+# Read-only query or read-only-permitted mutation:
+set -o pipefail; /tmp/tmp.x1QZk3vA/bin/ctm auth login --agent \
+  --endpoint https://app.ctm.com/graphql \
+  | sed 's/^/Authorization: Bearer /' \
+  > /tmp/tmp.x1QZk3vA/authorization-header
 
-  (In a genuinely persistent shell a single
-  `export CTM_CONFIG=$(mktemp -d)/ctm.yml` works.)
+# Write mutation instead (replace the command above, do not run both):
+set -o pipefail; /tmp/tmp.x1QZk3vA/bin/ctm auth login --remote \
+  --show-token --no-config --endpoint https://app.ctm.com/graphql \
+  | sed 's/^/Authorization: Bearer /' \
+  > /tmp/tmp.x1QZk3vA/authorization-header
 
-  A fresh config also starts with no endpoint. If the target host lives in
-  `~/.ctm.yml` as `api_endpoint` rather than in `CTM_API_ENDPOINT`, the
-  session config hides it and the sign-in silently targets the production
-  default — pass `--endpoint <host>` on the login, which stores it in the
-  session config for every later call.
+curl -s --fail-with-body https://app.ctm.com/graphql \
+  -H @/tmp/tmp.x1QZk3vA/authorization-header \
+  -H "Content-Type: application/json" -d @request.json
+```
 
-  The prefix belongs on **every** `ctm` invocation for the rest of the
-  session, not just the login — including the `ctm auth check` and
-  `ctm auth token` calls in the request examples below, which are written
-  for the default config. A bare invocation reads `~/.ctm.yml` instead and
-  either fails or runs as whatever unrelated credential is stored there.
-  Delete the file when the session ends. This matters on a shared machine:
-  a stored login outranks `CTM_API_TOKEN` until it expires, so signing in
-  against the default `~/.ctm.yml` would silently switch identity for
-  every other `ctm` process relying on that exported token. Never print or
-  read the config file itself — it holds the live token.
-- **Headless / scripts**: set `CTM_API_TOKEN` to the account's Basic
-  Authentication Token (found in CTM under **Account Settings → API
-  Integration**). Ask the user to provide it through an environment variable
-  or secret store. Never print, log, or echo the token.
+The approver follows the URL and short code printed by the login command; the
+code expires after 10 minutes. Remove the exact temporary session directory
+when the work ends. It contains the CLI, installer, and live bearer-token
+header and must not survive the session:
 
-Credential precedence: `--token` flag, then an unexpired `ctm auth login`
-token, then `CTM_API_TOKEN`, then `api_token` in `~/.ctm.yml`.
+```bash
+rm -rf -- /tmp/tmp.x1QZk3vA
+```
+
+Credential precedence for an existing local install is: `--token` flag, then
+an unexpired `ctm auth login` token, then `CTM_API_TOKEN`, then `api_token` in
+`~/.ctm.yml`.
 
 ## Direct HTTP Requests (Preferred)
 
 Authenticated requests are a `POST` to the GraphQL endpoint with a JSON
-body of `{"query": ..., "variables": ...}`. Send them to the **same
-endpoint the CLI resolved the token for** — the `Endpoint:` line of
-`ctm auth check` (default `https://app.ctm.com/graphql`, but `--endpoint`,
-`CTM_API_ENDPOINT`, or the config file may select a different host, and a
-token minted for one host must never be posted to another). Get a bearer
-token from the CLI so the long-lived credential never enters your
-commands:
+body of `{"query": ..., "variables": ...}`. A token minted for one host
+must never be posted to another. With an existing local installation, send
+requests to the endpoint reported by `ctm auth check` (default
+`https://app.ctm.com/graphql`, but `--endpoint`, `CTM_API_ENDPOINT`, or the
+config file may select a different host) and get a bearer token from the CLI
+so the long-lived credential never enters your commands. With a temporary
+installation, skip this token-exchange example and use the endpoint and
+private header file created in the no-installation flow above.
 
 ```bash
 # One shared endpoint resolution. CTM_API_ENDPOINT and the config file
@@ -256,29 +216,6 @@ ctm auth token --endpoint "$ENDPOINT" \
 - Derive operations from the published schema files (see "Schema Files"
   below) — do not guess field names or rely on introspection being
   identical across versions.
-
-If the CLI is genuinely unavailable, the underlying exchange is: `POST` to
-`/api/v1/auth_tokens/graphql` on the same host, with an `Authorization`
-header containing the Basic Authentication Token behind exactly one
-`Basic ` prefix. The CLI accepts `CTM_API_TOKEN` with or without that
-prefix, but a raw HTTP header must not end up as `Basic Basic ...` — so
-build it conditionally:
-
-```sh
-# Match the scheme case-insensitively, as the CLI does — "basic <cred>"
-# is accepted too and must not gain a second prefix.
-case "$CTM_API_TOKEN" in
-  [Bb][Aa][Ss][Ii][Cc]\ *) AUTH="$CTM_API_TOKEN" ;;
-  *)                       AUTH="Basic $CTM_API_TOKEN" ;;
-esac
-```
-
-The response is `{"token": "Bearer JWTGQL...", "expires_in": ...}` — the
-token value **already includes the `Bearer ` scheme**, so use it as the
-whole `Authorization` header value; prepending another `Bearer ` produces
-a rejected `Bearer Bearer ...` header. Keep the Basic token in an
-environment variable or secret store only — never inline it in a command,
-file, or log.
 
 ## Finding Commands and Accounts
 

@@ -41,7 +41,7 @@ esac
 # syncing the script to the public repository, so the served installer and
 # the assets it downloads always come from the same immutable release. The
 # source-tree copy keeps the placeholder and resolves the latest release.
-RENDERED_VERSION="0.12.1"
+RENDERED_VERSION="0.12.2"
 
 if [ -n "${CTM_VERSION:-}" ]; then
   version=${CTM_VERSION#v}
