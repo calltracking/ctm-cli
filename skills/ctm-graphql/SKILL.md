@@ -77,22 +77,51 @@ Skip authentication when the task only needs the unauthenticated public API:
 
 ### No local installation
 
-Install the latest CLI into a unique temporary directory for this session
-only. Never install it into `~/.local/bin`, Homebrew, or another persistent
-location, and never alter the user's `PATH`. Download the installer before
-running it so a failed download cannot be hidden by a shell pipeline:
+Install the latest CLI into a unique temporary directory for the **entire
+Codex session**, not merely the current request or answer. Never install it
+into `~/.local/bin`, Homebrew, or another persistent location, and never alter
+the user's `PATH`. Download the installer before running it so a failed
+download cannot be hidden by a shell pipeline. Register a detached watcher
+against the long-lived Codex ancestor so the exact directory is removed after
+Codex exits:
 
 ```bash
-session_dir=$(mktemp -d)
-curl -fsSL -o "$session_dir/install.sh" https://cli.ctm.com/install.sh
-CTM_INSTALL_DIR="$session_dir/bin" sh "$session_dir/install.sh"
-printf 'Temporary ctm directory: %s\n' "$session_dir"
+ctm_session_dir=$(mktemp -d "${TMPDIR:-/tmp}/ctm-session.XXXXXX")
+curl -fsSL -o "$ctm_session_dir/install.sh" https://cli.ctm.com/install.sh
+CTM_INSTALL_DIR="$ctm_session_dir/bin" sh "$ctm_session_dir/install.sh"
+printf 'Temporary ctm directory: %s\n' "$ctm_session_dir"
+
+# Find the long-lived Codex process, not the short-lived command shell.
+ctm_codex_pid=$PPID
+ctm_codex_command=
+while test "$ctm_codex_pid" -gt 1; do
+  ctm_codex_command=$(ps -p "$ctm_codex_pid" -o comm= 2>/dev/null || true)
+  case "$ctm_codex_command" in
+    *[Cc]odex*) break ;;
+    *) ctm_codex_pid=$(ps -p "$ctm_codex_pid" -o ppid= 2>/dev/null | tr -d ' ') ;;
+  esac
+  test -n "$ctm_codex_pid" || break
+done
+
+if test -n "$ctm_codex_command" && test "$ctm_codex_pid" -gt 1; then
+  nohup sh -c '
+    while kill -0 "$1" 2>/dev/null \
+      && test "$(ps -p "$1" -o comm= 2>/dev/null)" = "$2"; do
+      sleep 30
+    done
+    test ! -d "$3" || find "$3" -depth -delete
+  ' ctm-cleanup "$ctm_codex_pid" "$ctm_codex_command" "$ctm_session_dir" \
+    >/dev/null 2>&1 &
+fi
 ```
 
 Remember the printed absolute directory. Agent tool calls often start fresh
 shells, so use the absolute binary path (for example
-`/tmp/tmp.x1QZk3vA/bin/ctm`) on every later invocation instead of relying on
-`session_dir` or an exported `PATH`.
+`/tmp/ctm-session.x1QZk3/bin/ctm`) on every later invocation instead of relying on
+`ctm_session_dir` or an exported `PATH`. Keep and reuse this directory for
+follow-up requests in the same Codex session. If its bearer token expires,
+repeat only the appropriate login command below and overwrite the header file;
+do not reinstall the CLI or redownload files already present.
 
 Do not use `ctm auth check`, a stored config, `CTM_API_TOKEN`, or the standard
 browser login with this temporary install. Authenticate ephemerally and pipe
@@ -109,34 +138,37 @@ directory:
 Use the same literal endpoint for login and every request. `--show-token`
 owns stdout while the approval URL and short code remain visible on stderr;
 pipe stdout immediately and never print, echo, command-substitute, or otherwise
-capture the live token in the transcript:
+capture the live token in the transcript. As soon as the command prints the
+approval URL and code, send the user a standalone, non-conditional instruction:
+**"Action required: open `<URL>` in your browser, enter code `<CODE>`, and
+approve the request. I will continue automatically after approval."** Relay the
+actual URL and code verbatim. Do not merely say to approve "if prompted," and
+do not wait silently while the user action is required.
 
 ```bash
 # Read-only query or read-only-permitted mutation:
-set -o pipefail; /tmp/tmp.x1QZk3vA/bin/ctm auth login --agent \
+set -o pipefail; /tmp/ctm-session.x1QZk3/bin/ctm auth login --agent \
   --endpoint https://app.ctm.com/graphql \
   | sed 's/^/Authorization: Bearer /' \
-  > /tmp/tmp.x1QZk3vA/authorization-header
+  > /tmp/ctm-session.x1QZk3/authorization-header
 
 # Write mutation instead (replace the command above, do not run both):
-set -o pipefail; /tmp/tmp.x1QZk3vA/bin/ctm auth login --remote \
+set -o pipefail; /tmp/ctm-session.x1QZk3/bin/ctm auth login --remote \
   --show-token --no-config --endpoint https://app.ctm.com/graphql \
   | sed 's/^/Authorization: Bearer /' \
-  > /tmp/tmp.x1QZk3vA/authorization-header
+  > /tmp/ctm-session.x1QZk3/authorization-header
 
 curl -s --fail-with-body https://app.ctm.com/graphql \
-  -H @/tmp/tmp.x1QZk3vA/authorization-header \
+  -H @/tmp/ctm-session.x1QZk3/authorization-header \
   -H "Content-Type: application/json" -d @request.json
 ```
 
-The approver follows the URL and short code printed by the login command; the
-code expires after 10 minutes. Remove the exact temporary session directory
-when the work ends. It contains the CLI, installer, and live bearer-token
-header and must not survive the session:
-
-```bash
-rm -rf -- /tmp/tmp.x1QZk3vA
-```
+The code expires after 10 minutes. Completing one request, returning an answer,
+or waiting for a possible follow-up does **not** end the session: do not remove
+the temporary directory then. The exit watcher owns normal cleanup after Codex
+closes. If no Codex ancestor was found and no watcher was registered, retain
+the directory for follow-ups and remove the exact path only when the user
+explicitly ends the session; never broaden the deletion target.
 
 Credential precedence for an existing local install is: `--token` flag, then
 an unexpired `ctm auth login` token, then `CTM_API_TOKEN`, then `api_token` in
