@@ -228,16 +228,20 @@ lasts until the code expires, so `--timeout` does not apply.
 ### Ephemeral agent sessions
 
 ```sh
-TOKEN=$(ctm auth login --agent)
+umask 077
+header_file=$(mktemp)
+ctm auth login --agent \
+  | sed 's/^/Authorization: Bearer /' > "$header_file"
 ```
 
 `--agent` is shorthand for `--remote --readonly --show-token --no-config`: the
 device flow above, pinned read-only, with the relay message and summary on
 stderr and the bare verified token on stdout — **never written to any config
-file**. The credential exists only where the caller put it, so an agent that
-needs the token just for its own session holds it in memory and nothing
-lingers on disk. Because nothing is stored, the login also cannot outrank an
-exported `CTM_API_TOKEN` for other processes on a shared machine.
+file by `ctm`**. The caller owns the output: pipe it directly into a consumer,
+hold it in memory, or keep it in a private session-scoped file such as the
+header above and remove that file when the session ends. Because the CLI stores
+nothing, the login cannot outrank an exported `CTM_API_TOKEN` for other
+processes on a shared machine.
 
 If the server ignores the read-only pin (an older release), the command fails
 without printing the token rather than handing an automated caller more access
@@ -507,6 +511,14 @@ teaches an agent to:
   ids and `legacyId`, strict timeframe scalars, and exact money values
 - confirm with you before running mutations against live account
   configuration
+
+The playbook also defines the agent-session lifecycle. It checks an existing
+`ctm` against the latest release and uses the normal browser login. If `ctm` is
+absent, it installs the latest release only into a private temporary directory,
+uses the ephemeral device flow, and tells the user explicitly to open the
+displayed URL, enter the displayed code, and approve. Codex retains that
+temporary CLI and authentication for follow-up requests in the same session,
+then an exit watcher removes the directory after Codex closes.
 
 For Claude Code, copy the skill into your project (or into
 `~/.claude/skills/` to enable it everywhere):
