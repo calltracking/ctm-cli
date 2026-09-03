@@ -26,10 +26,18 @@ Basic Authentication Token — let the CLI hold and exchange it.
 The GraphQL conventions below (operations, ids, pagination, timeframes,
 money) apply identically to both paths.
 
-Customer phone calls, text messages, and form submissions are exposed as
-account-scoped `Activity` values. Activity lists and typed reads come from
-Elasticsearch activity history; outbound texts use the existing CTM
-delivery workflow.
+Two authenticated-schema operations are reserved for internally provisioned
+service identities: `createZendeskTroubleshoot` and
+`zendeskTroubleshootRequest`. Normal API tokens and `ctm auth login` users
+cannot invoke them. Do not try to obtain or substitute a human credential for
+these operations. Their service credential is provisioned by CTM, and the
+start operation accepts only a Zendesk ticket number; CTM fetches that ticket
+and derives exactly one target account from its authoritative call references.
+
+Customer phone calls, text messages, form submissions, chats, video meetings,
+and faxes are exposed as account-scoped `Activity` values. Activity lists and
+typed reads come from Elasticsearch activity history; outbound texts use the
+existing CTM delivery workflow.
 
 ## Before Doing Anything
 
@@ -274,10 +282,11 @@ ctm auth token --endpoint "$ENDPOINT" \
 
 ## Customer Activities
 
-`Activity` is a GraphQL interface implemented by `PhoneCall`,
-`TextMessage`, and `FormSubmission`. Its `id` and `legacyId` identify the
-underlying Call activity record. A text's separate Message identity is in
-`messageId`; a form's configured reactor identity is in `formId`.
+`Activity` is a GraphQL interface implemented by `PhoneCall`, `TextMessage`,
+`FormSubmission`, `ActivityChat`, `ActivityVideo`, and `ActivityFax`. Its `id`
+and `legacyId` identify the underlying Call activity record. A text's separate
+Message identity is in `messageId`; a form's configured reactor identity is in
+`formId`. `CHAT` includes both web chats and internal team chats.
 
 When a request names a call or call ID, read it directly with
 `ctm account phone-call view ACCOUNT_ID ACTIVITY_ID`. When the request names
@@ -301,6 +310,9 @@ ctm account activity view ACCOUNT_ID ACTIVITY_ID
 ctm account phone-call view ACCOUNT_ID ACTIVITY_ID
 ctm account text-message view ACCOUNT_ID ACTIVITY_ID
 ctm account form-submission view ACCOUNT_ID ACTIVITY_ID
+ctm account chat-activity view ACCOUNT_ID ACTIVITY_ID
+ctm account video-activity view ACCOUNT_ID ACTIVITY_ID
+ctm account fax-activity view ACCOUNT_ID ACTIVITY_ID
 ```
 
 List output contains fields common to every activity. Use `ctm exec` with
