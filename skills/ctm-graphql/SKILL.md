@@ -395,14 +395,27 @@ mutation SendCustomerText($input: SendTextMessageInput!) {
     activityId
     status
     errors
+    resultReused
+    clientMutationId
   }
 }
 ```
 
 Pass `accountId`, `toNumber`, `body`, and optionally
-`fromTrackingNumberId` or `statusCallbackUrl`. Always inspect the payload's
-`errors` even when the HTTP request itself succeeds. The text `activityId`
-may be null until background processing creates its Call activity record.
+`fromTrackingNumberId`, `statusCallbackUrl`, `idempotencyKey`, or
+`clientMutationId`. Generate an `idempotencyKey`
+once for each user-approved send and keep it with that logical action until
+the result is definitive. Reuse the same key and unchanged input after an
+ambiguous transport failure; never generate a fresh key merely because the
+first response was lost. The key is retained for 24 hours, must contain 1-255
+printable ASCII bytes, and must not contain customer data, credentials, or
+other secrets. Matching input returns the first completed result with
+`resultReused: true`; changed send input returns `IDEMPOTENCY_KEY_CONFLICT`.
+Completed validation and rate-limit errors are retained too, so use a new key
+after correcting an input or starting another send attempt. `clientMutationId`
+remains per-attempt Relay correlation: it is echoed but excluded from the
+idempotency fingerprint. Always inspect the payload's `errors` even when the
+HTTP request itself succeeds. `activityId` is null when no Message was persisted.
 
 ## Object IDs
 
@@ -496,6 +509,37 @@ Rules for the documents themselves:
   you actually want.
 - Enum values are UPPER_SNAKE (`NAME`, `UPDATED_AT`, `ASC`); field and
   argument names are camelCase.
+
+### Retrying mutations safely
+
+Use an idempotency key only when the mutation's input type declares
+`idempotencyKey`. It identifies one logical action rather than one HTTP
+attempt. Generate a UUID v4 or v7 before the first request and retain it with
+the pending action. Reuse that exact key with identical behavior-affecting
+input after a timeout, connection loss, ambiguous 5xx response, or an
+`IDEMPOTENCY_REQUEST_IN_PROGRESS` error. If that error includes
+`retryAfterMs`, wait at least that long before retrying.
+
+If `IDEMPOTENCY_REQUEST_IN_PROGRESS` persists, do not infer that the effect
+failed and do not silently switch to a new key: execution may have completed
+before its replay result was stored. Reconcile the domain state or ask the user
+before another attempt. The claim expires after 24 hours, but retrying after
+expiry can repeat an effect whose outcome was lost.
+
+Generate a new key when the user requests a new action or any semantic input
+changes. Never recycle a key across mutations, and never retry changed input
+under the old key: the API returns `IDEMPOTENCY_KEY_CONFLICT`. A successfully
+stored response payload completes the attempt. A top-level GraphQL error may
+occur before the key is claimed or leave a claimed attempt incomplete, so do
+not assume that error created a replayable result and do not blindly rekey it.
+`clientMutationId` remains a Relay client-correlation value and does not
+deduplicate server effects.
+
+Prefer supplying the key for mutations that create records, send messages,
+charge money, enqueue work, or otherwise cause an effect that would be harmful
+to repeat. If the input type has no `idempotencyKey`, the API makes no generic
+deduplication promise; inspect the schema and mutation-specific documentation
+before retrying.
 
 ## Timeframe Arguments
 
