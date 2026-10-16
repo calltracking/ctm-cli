@@ -26,6 +26,30 @@ Basic Authentication Token — let the CLI hold and exchange it.
 The GraphQL conventions below (operations, ids, pagination, timeframes,
 money) apply identically to both paths.
 
+### Customer machine identities
+
+When the user explicitly requests a machine identity, use `ctm --machine`
+for every authenticated invocation. This mode never uses a cached human
+login or `CTM_API_TOKEN`. Supply an administrator-issued key through
+`CTM_MACHINE_TOKEN`, or connect with `ctm --machine auth login` (add
+`--remote` when the approving person's browser is on another computer).
+Add `--machine-id ID` to open approval for a specific machine without selecting
+its owner. Use the GraphQL ID from Machine Identities or a numeric machine ID;
+the CLI verifies that the returned session belongs to that identity.
+An administrator of the owning account or agency approves the previously created machine; approval issues a one-hour
+machine session, stored separately from human credentials. Expired sessions
+require approval again. Continuous unattended execution uses an API key.
+Creating or editing identities can be delegated, but issuing API keys and approving CLI connections require owner administration. Administrator authority is checked again when the CLI redeems the approval.
+
+Check identity with `ctm --machine auth check`. Use Manage access on the identity to assign an account role and optional additional profiles. Ownership alone grants no account access. A new machine can query
+`principal`, but has no implicit account-content access. A permission denial
+requires an explicit account role and any additional Access Profiles assigned on the Machine Identities page; never resolve it by falling
+back to a human credential. Machine credentials cannot administer machines
+or invoke CTM's internal troubleshooting workflow. API keys are sent directly
+as GraphQL bearer credentials; they do not use the Basic-token exchange.
+
+The human-login instructions below apply when machine mode was not requested.
+
 Two authenticated-schema operations are reserved for internally provisioned
 service identities: `createZendeskTroubleshoot` and
 `zendeskTroubleshootRequest`. Normal API tokens and `ctm auth login` users
@@ -613,7 +637,11 @@ Apollo) and query linting; and diff between releases (e.g.
   mutation rejected as read-only means the user has to sign in again with
   write access, not that the operation is wrong.
 - GraphQL responses can carry both partial `data` and an `errors` array —
-  check both before treating a request as successful.
+  check both before treating a request as successful. When `errors` is not
+  empty, `ctm exec` exits with status 1, prints a summary with each error's
+  code and other scalar extensions to stderr, and, with the default or
+  `--output raw` and no `--field`, prints the whole response (`data` and
+  `errors` with every extension, such as `retryAfterMs`) to stdout.
 - Exports the user asked for (CSV/JSON of reports, numbers, users)
   legitimately contain real customer data — write them to the destination
   the user chose. Everywhere else — example queries, documentation, logs,
