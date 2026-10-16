@@ -20,17 +20,22 @@ here:
   document without handling tokens at all. Best for shell scripts,
   one-liners, and tabular/CSV output.
 
-Either way, never hand-roll authentication headers from the long-lived
-Basic Authentication Token — let the CLI hold and exchange it.
+Either way, let the CLI hold the credential. Never use the account or agency
+Basic Authentication Token from Account Settings → API Integration with the
+GraphQL API; it belongs to the v1 REST API. People sign in with
+`ctm auth login`; scripts, CI, scheduled jobs, and long-running agents use a
+machine identity.
 
 The GraphQL conventions below (operations, ids, pagination, timeframes,
 money) apply identically to both paths.
 
-### Customer machine identities
+### Machine identities for unattended work
 
-When the user explicitly requests a machine identity, use `ctm --machine`
-for every authenticated invocation. This mode never uses a cached human
-login or `CTM_API_TOKEN`. Supply an administrator-issued key through
+When work must run without a person signing in, or when the user requests a
+machine identity, use `ctm --machine` for every authenticated invocation. Do
+not suggest the Basic Authentication Token as an alternative. Machine mode
+never uses a cached human login or `CTM_API_TOKEN`. Supply an
+administrator-issued machine API key (`ctm_machine_...`) through
 `CTM_MACHINE_TOKEN`, or connect with `ctm --machine auth login` (add
 `--remote` when the approving person's browser is on another computer).
 Add `--machine-id ID` to open approval for a specific machine without selecting
@@ -38,7 +43,12 @@ its owner. Use the GraphQL ID from Machine Identities or a numeric machine ID;
 the CLI verifies that the returned session belongs to that identity.
 An administrator of the owning account or agency approves the previously created machine; approval issues a one-hour
 machine session, stored separately from human credentials. Expired sessions
-require approval again. Continuous unattended execution uses an API key.
+require approval again. Continuous unattended execution uses a machine API
+key: an administrator creates the identity on the Machine Identities page
+(Settings → Users → Machine Identities) or with the `createMachineIdentity`
+mutation, then issues the key there or with `issueMachineCredential`. Keys
+are read-only unless the administrator turns that off, can carry an
+expiration, and are shown once; keep the key in the runtime's secret store.
 Creating or editing identities can be delegated, but issuing API keys and approving CLI connections require owner administration. Administrator authority is checked again when the CLI redeems the approval.
 
 Check identity with `ctm --machine auth check`. Use Manage access on the identity to assign an account role and optional additional profiles. Ownership alone grants no account access. A new machine can query
@@ -46,13 +56,15 @@ Check identity with `ctm --machine auth check`. Use Manage access on the identit
 requires an explicit account role and any additional Access Profiles assigned on the Machine Identities page; never resolve it by falling
 back to a human credential. Machine credentials cannot administer machines
 or invoke CTM's internal troubleshooting workflow. API keys are sent directly
-as GraphQL bearer credentials; they do not use the Basic-token exchange.
+as GraphQL bearer credentials, with no token exchange. Run GraphQL documents
+with `ctm --machine exec`; `ctm --machine auth token` prints only a
+short-lived machine session token and never an API key.
 
 The human-login instructions below apply when machine mode was not requested.
 
 Two authenticated-schema operations are reserved for internally provisioned
 service identities: `createZendeskTroubleshoot` and
-`zendeskTroubleshootRequest`. Normal API tokens and `ctm auth login` users
+`zendeskTroubleshootRequest`. Machine identities and `ctm auth login` users
 cannot invoke them. Do not try to obtain or substitute a human credential for
 these operations. Their service credential is provisioned by CTM, and the
 start operation accepts only a Zendesk ticket number; CTM fetches that ticket
@@ -202,9 +214,9 @@ closes. If no Codex ancestor was found and no watcher was registered, retain
 the directory for follow-ups and remove the exact path only when the user
 explicitly ends the session; never broaden the deletion target.
 
-Credential precedence for an existing local install is: `--token` flag, then
-an unexpired `ctm auth login` token, then `CTM_API_TOKEN`, then `api_token` in
-`~/.ctm.yml`.
+For an existing local install, a `--token` flag outranks the stored
+`ctm auth login` token. Machine mode reads only machine credentials: `--token`,
+then `CTM_MACHINE_TOKEN`, then the machine credential stored in `~/.ctm.yml`.
 
 ## Direct HTTP Requests (Preferred)
 
@@ -215,8 +227,8 @@ requests to the endpoint reported by `ctm auth check` (default
 `https://app.ctm.com/graphql`, but `--endpoint`, `CTM_API_ENDPOINT`, or the
 config file may select a different host) and get a bearer token from the CLI
 so the long-lived credential never enters your commands. With a temporary
-installation, skip this token-exchange example and use the endpoint and
-private header file created in the no-installation flow above.
+installation, skip this example and use the endpoint and private header file
+created in the no-installation flow above.
 
 ```bash
 # One shared endpoint resolution. CTM_API_ENDPOINT and the config file
@@ -250,10 +262,8 @@ ctm auth token --endpoint "$ENDPOINT" \
   exposing the credential in your transcript or logs:
   `ctm auth token >/dev/null` (or run `ctm auth check`). Never print the
   token itself, and never expand it into a command's argument list.
-- The printed token is short-lived — about an hour, whether it was
-  exchanged from an API token or is an unexpired `ctm auth login`
-  credential printed as-is (the exchange response's `expires_in` is
-  authoritative). Treat every emitted token as a secret regardless.
+- The printed token is the unexpired `ctm auth login` credential, which
+  lasts about an hour. Treat every emitted token as a secret regardless.
 - Re-run `ctm auth token` when a request comes back unauthorized — that is
   what expiry looks like. For a batch of requests, write the header to a
   private temp file once and reuse it, so the token is never expanded in
@@ -288,7 +298,8 @@ ctm auth token --endpoint "$ENDPOINT" \
   in the schema there is usually a typed command for it.
 - Most commands take an account id as their first argument, because one
   token can reach more than one account.
-- `ctm viewer` describes the signed-in user or API token.
+- `ctm viewer` describes the signed-in user; `ctm --machine auth check`
+  names the machine identity in use.
 - `ctm accounts list --output table --fields id,legacyId,name` finds
   account ids.
 

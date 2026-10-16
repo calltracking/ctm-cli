@@ -118,20 +118,26 @@ shasum -a 256 -c checksums.txt --ignore-missing
 There are two ways to authenticate. Which one you want depends on whether a
 person or a script is running the command.
 
-|                | `ctm auth login`                          | Basic Authentication Token           |
-| -------------- | ----------------------------------------- | ------------------------------------ |
-| **Use it for** | day-to-day work at your own terminal      | scripts, CI, cron, anything headless |
-| **Acts as**    | you, with your own permissions            | your account's API user              |
-| **Lifetime**   | one hour, re-run to renew                 | long-lived until you rotate it       |
-| **Setup**      | sign in through the browser               | copy the token from Account Settings |
-| **Browser**    | required                                  | never needed                         |
+|                | `ctm auth login`                     | Machine identity (`ctm --machine`)                    |
+| -------------- | ------------------------------------ | ----------------------------------------------------- |
+| **Use it for** | day-to-day work at your own terminal | scripts, CI, cron, AI agents, anything headless       |
+| **Acts as**    | you, with your own permissions       | a named machine, with the account role you grant it   |
+| **Lifetime**   | one hour, re-run to renew            | an API key lasts until it is revoked or expires       |
+| **Setup**      | sign in through the browser          | an administrator creates the machine and issues a key |
+| **Browser**    | required                             | never needed with an API key                          |
 
-Both are stored in `~/.ctm.yml`, which is written with `0600` permissions.
+Credentials stored by `ctm` go in `~/.ctm.yml`, which is written with `0600`
+permissions. A machine API key can instead come from the `CTM_MACHINE_TOKEN`
+environment variable.
+
+The **Basic Authentication Token** from Account Settings → API Integration is a
+credential for the v1 REST API. Do not use it with `ctm`: support for it in the
+GraphQL API is being retired. Use a machine identity instead.
 
 ### Signing in through the browser
 
 Best for interactive use: there is no secret to copy around, and the CLI acts
-as you rather than as a shared API user.
+as you.
 
 ```sh
 ctm auth login
@@ -176,7 +182,7 @@ Useful flags:
 signing in from a different machine: the browser has to reach `127.0.0.1` on the
 machine running `ctm`. Over SSH that means forwarding the port the command
 prints (`ssh -L`). On a host where that is impractical, use `--remote` (below)
-or an API token.
+or a [machine identity](#machine-identities).
 
 `--show-token` additionally prints the bearer token — and nothing else — on
 stdout, moving the sign-in progress to stderr, so a sign-in and the header it
@@ -240,8 +246,8 @@ stderr and the bare verified token on stdout — **never written to any config
 file by `ctm`**. The caller owns the output: pipe it directly into a consumer,
 hold it in memory, or keep it in a private session-scoped file such as the
 header above and remove that file when the session ends. Because the CLI stores
-nothing, the login cannot outrank an exported `CTM_API_TOKEN` for other
-processes on a shared machine.
+nothing, the login does not change the credential that other `ctm` processes
+on a shared machine use.
 
 If the server ignores the read-only pin (an older release), the command fails
 without printing the token rather than handing an automated caller more access
@@ -261,30 +267,98 @@ started the request with a secret that never leaves your machine (PKCE), so the
 token never appears in a URL or in your browser history. The browser hands the
 code back only to `127.0.0.1` on a port the CLI is listening on.
 
-### Using an API token
+### Machine identities
 
-Best for anything unattended. Use the **Basic Authentication Token** from CTM
-under **Account Settings → API Integration** (not the Access Key or Secret
-Key):
+Best for anything unattended: scripts, CI, scheduled jobs, and AI agents that
+run with no person at the keyboard. A machine identity is a named CTM identity
+that belongs to an account or an agency. It acts with the account role an
+administrator grants it, never as the person who created it, and CTM records
+the machine on every request it makes.
+
+**1. Create the machine and grant it access.** An account or agency
+administrator opens **Settings → Users → Machine Identities** in CTM, creates
+an identity, and uses **Manage access** to give it an account role (and,
+optionally, additional Access Profiles). Ownership alone grants no account
+access: a machine with no role can identify itself, but it cannot read account
+data. An agency-owned machine needs a role in each account it works with.
+
+**2. Issue an API key.** On the same page, the administrator issues a key for
+the machine. The key is shown once, so copy it straight into your secret
+store. Keys are read-only unless the administrator clears that option, and
+they can carry an expiration. To rotate a key, issue a second key, deploy it,
+and then revoke the first one.
+
+Administrators can also do both steps from the CLI, signed in with
+`ctm auth login` and write access. `ownerId` is the GraphQL id of the owning
+account or agency (for example, from `ctm account view ACCOUNT_ID --field id`):
 
 ```sh
-ctm config set --token YOUR_TOKEN
-ctm auth check
+ctm machine identity create --set ownerId=OWNER_ID --set name='Nightly export'
+ctm machine credential issue --set ownerId=OWNER_ID --set id=MACHINE_ID \
+  --set name='CI runner' --field apiKey
 ```
 
-Or keep it out of the config file entirely:
+Grant the account role with **Manage access** on the Machine Identities page,
+or with the `setMachineIdentityAccess` mutation through `ctm exec`.
+
+**3. Run commands as the machine.** Give the key to the runtime through
+`CTM_MACHINE_TOKEN` and pass `--machine` to every command:
 
 ```sh
-export CTM_API_TOKEN=YOUR_TOKEN
-ctm auth check
+export CTM_MACHINE_TOKEN='ctm_machine_...'   # from your secret store
+ctm --machine auth check
+ctm --machine account view ACCOUNT_ID
 ```
+
+```
+Endpoint: https://app.ctm.com/graphql
+Credential: CTM_MACHINE_TOKEN
+Machine: Nightly export (MACHINE_ID)
+Owner: ACCOUNT (OWNER_ID)
+```
+
+To keep the key in the config file instead, run
+`ctm --machine config set --token 'ctm_machine_...'`. Add `--endpoint` if the
+key is for an endpoint other than the default.
+
+Machine mode reads only machine credentials: `--token`, then
+`CTM_MACHINE_TOKEN`, then the machine credential in the config file. It never
+falls back to your own `ctm auth login` token, and commands without
+`--machine` never use a machine credential. A permission error means the
+machine needs a role or an Access Profile, not a human login.
+
+The API key is itself the GraphQL bearer credential, so a direct HTTP request
+sends it as is. Pipe the header in so that the key stays out of the process
+argument list:
+
+```bash
+printf 'Authorization: Bearer %s\n' "$CTM_MACHINE_TOKEN" \
+  | curl -s --fail-with-body https://app.ctm.com/graphql -H @- \
+      -H "Content-Type: application/json" \
+      -d '{"query": "query Me { principal { __typename ... on MachinePrincipal { id name } } }"}'
+```
+
+#### Approving a one-hour machine session
+
+If you do not want to keep a long-lived key, an administrator can approve a
+one-hour session for an existing machine instead:
+
+```sh
+ctm --machine auth login            # add --remote when no browser is available here
+ctm --machine auth login --machine-id MACHINE_ID
+```
+
+The administrator signs in to CTM, selects the machine, and approves. The CLI
+then verifies that the session belongs to that machine and stores it apart
+from your own login. A session is never renewed automatically: when it expires,
+an administrator must approve again. For continuous unattended work, use an
+API key.
 
 ### Getting a token for direct HTTP requests
 
 If you (or a script or AI agent) want to talk to the GraphQL API directly —
-with `curl`, an HTTP library, or GraphQL tooling — don't build the
-`Authorization` header from your long-lived API token. Ask the CLI for a
-short-lived bearer token instead:
+with `curl`, an HTTP library, or GraphQL tooling — sign in with
+`ctm auth login` and ask the CLI for the short-lived bearer token:
 
 ```bash
 set -o pipefail   # Bash/zsh/ksh; POSIX sh rejects pipefail
@@ -306,23 +380,14 @@ when the credential still has to be established on a browserless machine,
 `ctm auth login --remote` is the sign-in half of this pattern. The
 token expires after about an hour — capture it once per batch of requests
 and re-run the command when a request comes back unauthorized. Send it only
-to the endpoint the CLI resolved it for (`ctm auth check` prints it). The
-long-lived Basic Authentication Token never appears in your command line,
-shell history, or logs.
+to the endpoint the CLI resolved it for (`ctm auth check` prints it).
 
 ### Which credential gets used
 
-When more than one is available, the CLI picks the first of:
-
-1. `--token`
-2. An unexpired token from `ctm auth login`
-3. `CTM_API_TOKEN`
-4. `api_token` in the config file
-
-Note the second entry: **signing in takes effect immediately even if you keep
-`CTM_API_TOKEN` exported**, so an interactive login is never silently ignored.
-Once that token expires the CLI falls back to `CTM_API_TOKEN` or `api_token`, so
-scripts on the same machine keep working without a browser.
+Without `--machine`, the CLI uses the `--token` flag if you pass one, and
+otherwise the unexpired token from `ctm auth login`. With `--machine`, it uses
+`--token`, then `CTM_MACHINE_TOKEN`, then the machine credential in the config
+file, and never your own login.
 
 `ctm auth check` always reports which credential is in play, and points out when
 one is outranking another:
@@ -350,14 +415,18 @@ ctm config show
 ```
 Config: /Users/jane/.ctm.yml
 api_endpoint: https://app.ctm.com/graphql
-api_token: abcd************************wxyz
+api_token: (unset)
 graphql_token: JWTG************************jkGw
 graphql_token_expires_at: 2026-08-03T15:12:02-04:00
 graphql_token_endpoint: https://app.ctm.com/graphql
+machine_token: (unset)
+machine_token_endpoint: (unset)
+machine_token_expires_at: (unset)
 ```
 
-The `graphql_token*` entries are managed by `ctm auth login`; `api_token` is the
-one you set yourself.
+`ctm auth login` manages the `graphql_token*` entries. The `machine_token*`
+entries hold a machine credential from `ctm --machine config set --token` or
+`ctm --machine auth login`.
 
 ## Usage
 
@@ -503,8 +572,9 @@ teaches an agent to:
 - work schema-first: derive GraphQL operations from the released
   `schema.graphql` and send them directly over HTTP with a short-lived
   token from `ctm auth token`, or use the CLI's typed commands and
-  `ctm exec` for scripts — never hand-rolling auth headers from the
-  long-lived API token
+  `ctm exec` for scripts
+- run unattended work as a machine identity with `ctm --machine`, never
+  as a person's login
 - write correct GraphQL operations: named operations with variables,
   account nesting, connection pagination, and sorting
 - handle CTM API conventions that agents otherwise get wrong: opaque global
@@ -538,11 +608,11 @@ matches the latest released binary and schema.
 
 ## Environment variables
 
-| Variable           | Purpose                                                  |
-| ------------------ | -------------------------------------------------------- |
-| `CTM_API_TOKEN`    | Basic Authentication Token used for API requests. Outranked by an unexpired `ctm auth login` token |
-| `CTM_API_ENDPOINT` | GraphQL endpoint (defaults to `https://app.ctm.com/graphql`) |
-| `CTM_CONFIG`       | Path to the YAML config file (defaults to `~/.ctm.yml`)   |
+| Variable            | Purpose                                                          |
+| ------------------- | ---------------------------------------------------------------- |
+| `CTM_MACHINE_TOKEN` | Machine identity API key or session, used only with `--machine`  |
+| `CTM_API_ENDPOINT`  | GraphQL endpoint (defaults to `https://app.ctm.com/graphql`)     |
+| `CTM_CONFIG`        | Path to the YAML config file (defaults to `~/.ctm.yml`)          |
 
 ## Support
 
