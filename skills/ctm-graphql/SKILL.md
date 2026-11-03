@@ -303,6 +303,56 @@ ctm auth token --endpoint "$ENDPOINT" \
 - `ctm accounts list --output table --fields id,legacyId,name` finds
   account ids.
 
+## Finding the Right Operation
+
+Users name CTM features with the words of CTM's screens and help center
+("custom field", "reporting tag", "voice menu") or their own ("disposition",
+"IVR"), not with GraphQL names. Translate the words before you search the
+schema:
+
+1. Look the words up in the [concept index](references/concepts.md). It
+   gives the CTM name, a help article, and the GraphQL fields to use.
+2. If the words are not there, or you need to know what a feature does,
+   search CTM's public help center. It needs no credential:
+
+   ```sh
+   curl -s 'https://calltrackingmetrics.zendesk.com/api/v2/help_center/articles/search.json?per_page=5&query=custom%20field%20on%20a%20call'
+   ```
+
+   Each result has `title`, the article text as HTML in `body`, and
+   `html_url`. Read `body`. The `html_url` page refuses clients that are
+   not browsers (HTTP 403), so give it to the user instead of fetching it.
+   One article by number:
+   `https://calltrackingmetrics.zendesk.com/api/v2/help_center/en-us/articles/<number>.json`
+   (`article.body`). Articles describe CTM's screens, not the API. The
+   search matches CTM's own words only: "disposition" does not find
+   "reporting tag".
+3. Search the descriptions in `schema.graphql` (see "Schema Files") with
+   the CTM name. Descriptions state each field's business meaning and
+   usually its permissions, but some omit a check that CTM still enforces:
+   an "Access denied" refusal is final even when the description names no
+   permission.
+   This prints the type, field, argument, or enum value that each matching
+   description belongs to:
+
+   ```sh
+   awk -v q="custom field" '
+     BEGIN { q = tolower(q) }
+     /^ *"""$/ { indesc = !indesc; next }
+     indesc { if (index(tolower($0), q)) { if ($0 ~ /^    /) print type "." field " (argument)"; else if ($0 ~ /^  /) hit = 1; else typehit = 1 }; next }
+     /^(type|input|interface|enum|union|scalar) / { type = $2; hit = 0; if (typehit) { print type; typehit = 0 } }
+     /^}/ { hit = 0 }
+     /^  [A-Za-z_]/ { field = $1; sub(/[(:].*/, "", field); if (hit) { print type "." field; hit = 0 } }
+   ' schema.graphql | sort -u
+   ```
+
+   Start with the results under `Account` (reads) and `Mutation` (writes),
+   then read only those fields and the types they use. Find the typed
+   command with `ctm --help`, or run the operation with `ctm exec`.
+4. If nothing fits, tell the user which CTM feature has no GraphQL
+   operation yet. Consider the v1 REST API only as "Customer Activities"
+   below describes.
+
 ## Output for Scripting
 
 - `--output raw` — compact JSON, ideal for piping to `jq`.
