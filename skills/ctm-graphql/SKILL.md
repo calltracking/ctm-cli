@@ -58,7 +58,12 @@ back to a human credential. Machine credentials cannot administer machines
 or invoke CTM's internal troubleshooting workflow. API keys are sent directly
 as GraphQL bearer credentials, with no token exchange. Run GraphQL documents
 with `ctm --machine exec`; `ctm --machine auth token` prints only a
-short-lived machine session token and never an API key.
+short-lived machine session token and never an API key. Typed commands select
+every field of a type, and CTM answers a machine with `MACHINE_NOT_ALLOWED` for
+a field whose description says "Not available to machine identities." So a
+machine reads a user (`id legacyId name`) or tracking numbers (`id legacyId name
+number smsEnabled smsSupported`) with its own document through `ctm --machine
+exec`, not with a typed `view` or `list` command.
 
 The human-login instructions below apply when machine mode was not requested.
 
@@ -313,20 +318,31 @@ schema:
 1. Look the words up in the [concept index](references/concepts.md). It
    gives the CTM name, a help article, and the GraphQL fields to use.
 2. If the words are not there, or you need to know what a feature does,
-   search CTM's public help center. It needs no credential:
+   search CTM's public help center. It needs no sign-in:
+
+   ```sh
+   ctm public help-documents --search="custom field on a call" --limit=5
+   ```
+
+   Each result has `name`, `url`, `type`, `updatedAt`, and an `excerpt` of
+   at most 300 characters, not the whole article. If your `ctm` has no
+   `help-documents` command (versions before v0.19.0), or CTM answers
+   "Field 'helpDocuments' doesn't exist on type 'PublicQuery'", search the
+   help center API instead:
 
    ```sh
    curl -s 'https://calltrackingmetrics.zendesk.com/api/v2/help_center/articles/search.json?per_page=5&query=custom%20field%20on%20a%20call'
    ```
 
-   Each result has `title`, the article text as HTML in `body`, and
-   `html_url`. Read `body`. The `html_url` page refuses clients that are
-   not browsers (HTTP 403), so give it to the user instead of fetching it.
-   One article by number:
+   Its results have `title`, the article text as HTML in `body`, and
+   `html_url`. Read the whole article through the API, one article by
+   number:
    `https://calltrackingmetrics.zendesk.com/api/v2/help_center/en-us/articles/<number>.json`
-   (`article.body`). Articles describe CTM's screens, not the API. The
-   search matches CTM's own words only: "disposition" does not find
-   "reporting tag".
+   (`article.body`). The number is the digits after `/articles/` in `url`
+   or `html_url`. That web page refuses clients that are not browsers
+   (HTTP 403), so give it to the user instead of fetching it. Articles
+   describe CTM's screens, not the API. The search matches CTM's own words
+   only: "disposition" does not find "reporting tag".
 3. Search the descriptions in `schema.graphql` (see "Schema Files") with
    the CTM name. Descriptions state each field's business meaning and
    usually its permissions, but some omit a check that CTM still enforces:
