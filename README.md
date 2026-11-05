@@ -267,7 +267,9 @@ started the request with a secret that never leaves your machine (PKCE), so the
 token never appears in a URL or in your browser history. The browser hands the
 code back only to `127.0.0.1` on a port the CLI is listening on.
 
-### Machine identities
+<a id="machine-identities"></a>
+
+### Machine identities (Coming soon)
 
 Best for anything unattended: scripts, CI, scheduled jobs, and AI agents that
 run with no person at the keyboard. A machine identity is a named CTM identity
