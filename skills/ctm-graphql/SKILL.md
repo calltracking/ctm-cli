@@ -503,8 +503,12 @@ mutation SendCustomerText($input: SendTextMessageInput!) {
 ```
 
 Pass `accountId`, `toNumber`, `body`, and optionally
-`fromTrackingNumberId`, `statusCallbackUrl`, `idempotencyKey`, or
-`clientMutationId`. Generate an `idempotencyKey`
+`fromTrackingNumberId`, `statusCallbackUrl`, `channel`, `idempotencyKey`, or
+`clientMutationId`. `channel` is `SMS` (the default, from the tracking number)
+or `WHATSAPP`, which sends from the account's connected WhatsApp sender and
+ignores `fromTrackingNumberId`; free text over WhatsApp is accepted only while
+the contact's 24-hour window is open and the account's WhatsApp outbound flow
+is on, otherwise `errors` says so. Generate an `idempotencyKey`
 once for each user-approved send and keep it with that logical action until
 the result is definitive. Reuse the same key and unchanged input after an
 ambiguous transport failure; never generate a fresh key merely because the
